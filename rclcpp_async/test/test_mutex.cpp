@@ -117,7 +117,7 @@ TEST_F(MutexTest, ThreeWayContention)
   Mutex mutex(*ctx_);
   std::vector<std::string> log;
 
-  auto make_worker = [&](const std::string & name) -> Task<void> {
+  auto make_worker = [&](std::string name) -> Task<void> {
     co_await mutex.lock();
     log.push_back(name + ":enter");
     co_await ctx_->sleep(10ms);

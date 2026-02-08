@@ -115,12 +115,17 @@ public:
 
   rclcpp::Node::SharedPtr node() { return node_; }
 
+  template <typename T>
+  [[nodiscard]] Task<T> create_task(Task<T> task)
+  {
+    task.handle.resume();
+    return task;
+  }
+
   template <typename CallbackT>
   [[nodiscard]] auto create_task(CallbackT && callback)
   {
-    auto task = callback();
-    task.handle.resume();
-    return task;
+    return create_task(callback());
   }
 
   // --- Awaiter factory methods ---
@@ -256,14 +261,6 @@ public:
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
       },
       [](const std::shared_ptr<GoalHandleT>) { return rclcpp_action::CancelResponse::ACCEPT; });
-  }
-
-  template <typename T>
-  Task<T> create_task(Task<T> task)
-  {
-    auto h = task.handle;
-    post([h]() { h.resume(); });
-    return task;
   }
 };
 
