@@ -81,9 +81,9 @@ auto task_b = ctx.create_task(do_work_b(ctx));
 ```cpp
 #include <std_msgs/msg/string.hpp>
 
-Task<void> listen(CoContext & ctx)
+Task<void> listen(CoContext & ctx, std::string topic)
 {
-  auto stream = ctx.subscribe<std_msgs::msg::String>("chatter", 10);
+  auto stream = ctx.subscribe<std_msgs::msg::String>(topic, 10);
 
   while (true) {
     auto r = co_await stream->next();
