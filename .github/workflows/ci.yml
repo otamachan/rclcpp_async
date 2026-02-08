@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ros_distro: [jazzy, rolling]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up workspace
+        run: |
+          mkdir -p ws/src
+          ln -s ../../rclcpp_async ws/src/rclcpp_async
+      - name: Build and test
+        run: |
+          ROS_DISTRO=${{ matrix.ros_distro }} ./run.sh bash -c \
+            "source /opt/ros/\$ROS_DISTRO/setup.bash \
+             && colcon build --event-handlers console_direct+ \
+             && source install/setup.bash \
+             && colcon test --event-handlers console_direct+ \
+             && colcon test-result --verbose"
