@@ -113,8 +113,8 @@ TEST_F(CreateActionServerTest, BasicExecution)
 
     auto stream = *goal_result.value;
     while (true) {
-      auto event = co_await stream->next();
-      if (!event.has_value()) {
+      auto r = co_await stream->next();
+      if (!r.ok() || !r.value->has_value()) {
         break;
       }
       feedback_count++;
@@ -175,8 +175,8 @@ TEST_F(CreateActionServerTest, CancelDuringExecution)
 
     auto stream = *goal_result.value;
     while (true) {
-      auto event = co_await stream->next();
-      if (!event.has_value()) {
+      auto r = co_await stream->next();
+      if (!r.ok() || !r.value->has_value()) {
         break;
       }
       feedback_count++;
@@ -237,8 +237,8 @@ TEST_F(CreateActionServerTest, AbortDuringExecution)
 
     auto stream = *goal_result.value;
     while (true) {
-      auto event = co_await stream->next();
-      if (!event.has_value()) {
+      auto r = co_await stream->next();
+      if (!r.ok() || !r.value->has_value()) {
         break;
       }
     }

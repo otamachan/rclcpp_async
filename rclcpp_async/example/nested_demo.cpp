@@ -182,11 +182,11 @@ int main(int argc, char * argv[])
       RCLCPP_INFO(logger, "[client] goal accepted");
 
       while (true) {
-        auto feedback = co_await stream->next();
-        if (!feedback.has_value()) {
+        auto r = co_await stream->next();
+        if (!r.ok() || !r.value->has_value()) {
           break;
         }
-        auto & seq = (*feedback)->sequence;
+        auto & seq = (*r.value.value())->sequence;
         RCLCPP_INFO(logger, "[client] feedback: length=%zu, last=%d",
           seq.size(), seq.back());
       }

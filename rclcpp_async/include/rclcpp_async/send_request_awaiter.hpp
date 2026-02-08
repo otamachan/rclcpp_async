@@ -37,6 +37,7 @@ struct SendRequestAwaiter
   typename ServiceT::Request::SharedPtr request;
   CancellationToken * token = nullptr;
   Result<Response> result;
+  bool done = false;
 
   void set_token(CancellationToken * t) { token = t; }
 

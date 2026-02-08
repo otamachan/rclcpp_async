@@ -47,11 +47,11 @@ rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
   RCLCPP_INFO(ctx.node()->get_logger(), "Goal accepted, waiting for feedback...");
 
   while (true) {
-    auto feedback = co_await stream->next();
-    if (!feedback.has_value()) {
+    auto r = co_await stream->next();
+    if (!r.ok() || !r.value->has_value()) {
       break;
     }
-    auto & seq = (*feedback)->sequence;
+    auto & seq = (*r.value.value())->sequence;
     RCLCPP_INFO(
       ctx.node()->get_logger(), "Feedback: sequence length=%zu, last=%d", seq.size(), seq.back());
   }

@@ -155,3 +155,67 @@ TEST_F(EventTest, ClearAndReuse)
   spin_until_done(task2);
   EXPECT_EQ(count, 2);
 }
+
+TEST_F(EventTest, CancelDuringWait)
+{
+  Event event(*ctx_);
+
+  bool was_cancelled = false;
+  auto coro = [&]() -> Task<void> {
+    auto r = co_await event.wait();
+    was_cancelled = r.cancelled();
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Spin a bit — task should be suspended
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running.cancel();
+  spin_until_done(running);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
+}
+
+TEST_F(EventTest, CancelDoesNotDoubleResume)
+{
+  Event event(*ctx_);
+
+  bool was_cancelled = false;
+  bool reached_end = false;
+  auto coro = [&]() -> Task<void> {
+    auto r = co_await event.wait();
+    was_cancelled = r.cancelled();
+    reached_end = true;
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Spin a bit — task should be suspended
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running.cancel();
+  spin_until_done(running);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
+
+  // Now set the event — should not cause a double-resume/crash
+  event.set();
+
+  // Spin a bit more to verify no crash
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_TRUE(reached_end);
+}

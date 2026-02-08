@@ -88,21 +88,37 @@ public:
 
   struct NextAwaiter
   {
+    using Feedback = std::shared_ptr<const typename ActionT::Feedback>;
+
     GoalStream & stream;
+    CancellationToken * token = nullptr;
+    bool cancelled = false;
 
-    bool await_ready() { return !stream.queue_.empty(); }
+    void set_token(CancellationToken * t) { token = t; }
 
-    void await_suspend(std::coroutine_handle<> h) { stream.waiter_ = h; }
-
-    std::optional<std::shared_ptr<const typename ActionT::Feedback>> await_resume()
+    bool await_ready()
     {
+      if (token && token->is_cancelled()) {
+        cancelled = true;
+        return true;
+      }
+      return !stream.queue_.empty();
+    }
+
+    void await_suspend(std::coroutine_handle<> h);
+
+    Result<std::optional<Feedback>> await_resume()
+    {
+      if (cancelled) {
+        return Result<std::optional<Feedback>>::Cancelled();
+      }
       auto & event = stream.queue_.front();
-      std::optional<std::shared_ptr<const typename ActionT::Feedback>> ret;
+      std::optional<Feedback> ret;
       if (event.type == Event::Type::kFeedback) {
         ret = std::move(event.feedback);
       }
       stream.queue_.pop();
-      return ret;
+      return Result<std::optional<Feedback>>::Ok(std::move(ret));
     }
   };
 
@@ -136,6 +152,7 @@ struct SendGoalAwaiter
   std::shared_ptr<GoalStream<ActionT>> stream;
   CancellationToken * token = nullptr;
   Result<std::shared_ptr<GoalStream<ActionT>>> result;
+  bool done = false;
 
   void set_token(CancellationToken * t) { token = t; }
 

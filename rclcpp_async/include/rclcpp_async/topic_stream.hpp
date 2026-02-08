@@ -22,6 +22,9 @@
 #include <string>
 #include <utility>
 
+#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/result.hpp"
+
 namespace rclcpp_async
 {
 
@@ -43,24 +46,40 @@ public:
 
   struct NextAwaiter
   {
+    using SharedPtr = typename MsgT::SharedPtr;
+
     TopicStream & stream;
+    CancellationToken * token = nullptr;
+    bool cancelled = false;
 
-    bool await_ready() { return !stream.queue_.empty() || stream.closed_; }
+    void set_token(CancellationToken * t) { token = t; }
 
-    void await_suspend(std::coroutine_handle<> h) { stream.waiter_ = h; }
-
-    std::optional<typename MsgT::SharedPtr> await_resume()
+    bool await_ready()
     {
+      if (token && token->is_cancelled()) {
+        cancelled = true;
+        return true;
+      }
+      return !stream.queue_.empty() || stream.closed_;
+    }
+
+    void await_suspend(std::coroutine_handle<> h);
+
+    Result<std::optional<SharedPtr>> await_resume()
+    {
+      if (cancelled) {
+        return Result<std::optional<SharedPtr>>::Cancelled();
+      }
       if (stream.closed_ && stream.queue_.empty()) {
-        return std::nullopt;
+        return Result<std::optional<SharedPtr>>::Ok(std::nullopt);
       }
       auto msg = std::move(stream.queue_.front());
       stream.queue_.pop();
-      return msg;
+      return Result<std::optional<SharedPtr>>::Ok(std::move(msg));
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this}; }
+  NextAwaiter next() { return NextAwaiter{*this, nullptr, false}; }
 
   void close();
 };

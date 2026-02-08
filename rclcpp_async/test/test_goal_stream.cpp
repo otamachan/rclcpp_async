@@ -141,8 +141,11 @@ TEST_F(GoalStreamTest, SendGoalAndReceiveResult)
 
     auto stream = *goal_result.value;
     while (true) {
-      auto event = co_await stream->next();
-      if (!event.has_value()) {
+      auto r = co_await stream->next();
+      if (!r.ok()) {
+        break;
+      }
+      if (!r.value->has_value()) {
         break;
       }
       got_feedback = true;
@@ -221,8 +224,8 @@ TEST_F(GoalStreamTest, CancelGoal)
 
     // Receive a few feedbacks, then cancel
     while (true) {
-      auto event = co_await stream->next();
-      if (!event.has_value()) {
+      auto r = co_await stream->next();
+      if (!r.ok() || !r.value->has_value()) {
         break;
       }
       feedback_count++;
@@ -267,6 +270,101 @@ TEST_F(GoalStreamTest, AlreadyCancelledIsImmediate)
   auto task = coro();
   task.cancel();
   auto running = ctx_->create_task(std::move(task));
+  spin_until_done(running, 10s);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
+}
+
+TEST_F(GoalStreamTest, CancelDuringSendGoal)
+{
+  create_accepting_server();
+
+  for (int i = 0; i < 50; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(10ms);
+    if (action_client_->action_server_is_ready()) {
+      break;
+    }
+  }
+  ASSERT_TRUE(action_client_->action_server_is_ready());
+
+  bool was_cancelled = false;
+
+  auto coro = [&]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 5;
+
+    // Use a timer to cancel during send_goal
+    auto timer = ctx_->create_timer(10ms);
+    co_await timer->next();
+    timer->cancel();
+
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    was_cancelled = goal_result.cancelled();
+  };
+
+  auto task = coro();
+  task.cancel();
+  auto running = ctx_->create_task(std::move(task));
+  spin_until_done(running, 10s);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
+}
+
+TEST_F(GoalStreamTest, CancelDuringFeedback)
+{
+  // Server sends many feedbacks with delay
+  create_accepting_server(20, 300);
+
+  for (int i = 0; i < 50; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(10ms);
+    if (action_client_->action_server_is_ready()) {
+      break;
+    }
+  }
+  ASSERT_TRUE(action_client_->action_server_is_ready());
+
+  bool was_cancelled = false;
+  int feedback_count = 0;
+
+  auto coro = [&]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 20;
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    if (!goal_result.ok()) {
+      co_return;
+    }
+
+    auto stream = *goal_result.value;
+    while (true) {
+      auto r = co_await stream->next();
+      if (r.cancelled()) {
+        was_cancelled = true;
+        break;
+      }
+      if (!r.ok() || !r.value->has_value()) {
+        break;
+      }
+      feedback_count++;
+    }
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Wait for server to start sending feedback, then cancel
+  for (int i = 0; i < 100; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(10ms);
+    if (feedback_count >= 1) {
+      break;
+    }
+  }
+
+  running.cancel();
   spin_until_done(running, 10s);
 
   ASSERT_TRUE(running.handle.done());

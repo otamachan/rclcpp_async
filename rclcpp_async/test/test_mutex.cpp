@@ -51,6 +51,15 @@ protected:
     }
   }
 
+  void spin_until_done(Task<void> & task, std::chrono::seconds timeout = 5s)
+  {
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
+      rclcpp::spin_some(node_);
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
 };
@@ -143,5 +152,129 @@ TEST_F(MutexTest, ThreeWayContention)
     // Same worker for enter/exit pair
     EXPECT_EQ(enter.substr(0, enter.find(':')), exit.substr(0, exit.find(':')));
   }
+  EXPECT_FALSE(mutex.is_locked());
+}
+
+TEST_F(MutexTest, CancelDuringLockWait)
+{
+  Mutex mutex(*ctx_);
+
+  bool was_cancelled = false;
+
+  // Worker A holds the lock
+  auto worker_a = [&]() -> Task<void> {
+    co_await mutex.lock();
+    co_await ctx_->sleep(200ms);
+    mutex.unlock();
+  };
+
+  // Worker B tries to lock — will be suspended waiting
+  auto worker_b = [&]() -> Task<void> {
+    co_await ctx_->sleep(10ms);  // ensure A locks first
+    auto r = co_await mutex.lock();
+    was_cancelled = r.cancelled();
+  };
+
+  auto task_a = ctx_->create_task(worker_a());
+  auto task_b = worker_b();
+  auto running_b = ctx_->create_task(std::move(task_b));
+
+  // Let B start waiting on the mutex
+  for (int i = 0; i < 30; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running_b.cancel();
+  spin_for(500ms);
+
+  ASSERT_TRUE(running_b.handle.done());
+  EXPECT_TRUE(was_cancelled);
+  ASSERT_TRUE(task_a.handle.done());
+  EXPECT_FALSE(mutex.is_locked());
+}
+
+TEST_F(MutexTest, CancelDoesNotTransferLock)
+{
+  Mutex mutex(*ctx_);
+
+  std::vector<std::string> log;
+  bool b_waiting = false;
+
+  // Worker A holds the lock for a while
+  auto worker_a = [&]() -> Task<void> {
+    co_await mutex.lock();
+    log.push_back("A:enter");
+    // Hold the lock until B is confirmed waiting, then a bit more
+    while (!b_waiting) {
+      co_await ctx_->sleep(5ms);
+    }
+    co_await ctx_->sleep(50ms);
+    log.push_back("A:exit");
+    mutex.unlock();
+  };
+
+  // Worker B tries to lock — will be added to wait queue, then cancelled
+  auto worker_b = [&]() -> Task<void> {
+    // Wait for A to hold the lock
+    co_await ctx_->sleep(20ms);
+    b_waiting = true;
+    auto r = co_await mutex.lock();
+    if (r.cancelled()) {
+      log.push_back("B:cancelled");
+    } else {
+      log.push_back("B:enter");
+      mutex.unlock();
+    }
+  };
+
+  // Worker C tries to lock after B
+  auto worker_c = [&]() -> Task<void> {
+    co_await ctx_->sleep(30ms);
+    co_await mutex.lock();
+    log.push_back("C:enter");
+    co_await ctx_->sleep(10ms);
+    log.push_back("C:exit");
+    mutex.unlock();
+  };
+
+  auto task_a = ctx_->create_task(worker_a());
+  auto task_b = worker_b();
+  auto running_b = ctx_->create_task(std::move(task_b));
+  auto task_c = ctx_->create_task(worker_c());
+
+  // Wait until B is confirmed to be waiting on the lock
+  for (int i = 0; i < 100 && !b_waiting; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+  ASSERT_TRUE(b_waiting);
+
+  // Give B one more spin to ensure it's in the wait queue
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running_b.cancel();
+  spin_for(500ms);
+
+  ASSERT_TRUE(task_a.handle.done());
+  ASSERT_TRUE(running_b.handle.done());
+  ASSERT_TRUE(task_c.handle.done());
+
+  // B was cancelled (not given the lock), C got the lock after A
+  bool b_was_cancelled = false;
+  bool c_entered = false;
+  for (const auto & entry : log) {
+    if (entry == "B:cancelled") {
+      b_was_cancelled = true;
+    }
+    if (entry == "C:enter") {
+      c_entered = true;
+    }
+  }
+  EXPECT_TRUE(b_was_cancelled);
+  EXPECT_TRUE(c_entered);
   EXPECT_FALSE(mutex.is_locked());
 }

@@ -71,9 +71,10 @@ TEST_F(TopicStreamTest, SubscribeAndReceiveMessage)
 
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
-    auto msg = co_await stream->next();
-    if (msg.has_value()) {
-      received = (*msg)->data;
+    auto r = co_await stream->next();
+    EXPECT_TRUE(r.ok());
+    if (r.ok() && r.value->has_value()) {
+      received = (*r.value.value())->data;
     }
   };
 
@@ -99,9 +100,10 @@ TEST_F(TopicStreamTest, ReceiveMultipleMessages)
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
     for (int i = 0; i < 3; i++) {
-      auto msg = co_await stream->next();
-      if (msg.has_value()) {
-        received.push_back((*msg)->data);
+      auto r = co_await stream->next();
+      EXPECT_TRUE(r.ok());
+      if (r.ok() && r.value->has_value()) {
+        received.push_back((*r.value.value())->data);
       }
     }
   };
@@ -132,8 +134,8 @@ TEST_F(TopicStreamTest, CloseReturnsNullopt)
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
     stream->close();
-    auto msg = co_await stream->next();
-    got_nullopt = !msg.has_value();
+    auto r = co_await stream->next();
+    got_nullopt = r.ok() && !r.value->has_value();
   };
 
   auto task = ctx_->create_task(coro());
@@ -141,4 +143,30 @@ TEST_F(TopicStreamTest, CloseReturnsNullopt)
 
   ASSERT_TRUE(task.handle.done());
   EXPECT_TRUE(got_nullopt);
+}
+
+TEST_F(TopicStreamTest, CancelDuringNext)
+{
+  bool was_cancelled = false;
+
+  auto coro = [&]() -> Task<void> {
+    auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
+    auto r = co_await stream->next();
+    was_cancelled = r.cancelled();
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Let subscription establish and coroutine suspend
+  for (int i = 0; i < 30; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(10ms);
+  }
+
+  running.cancel();
+  spin_until_done(running);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
 }

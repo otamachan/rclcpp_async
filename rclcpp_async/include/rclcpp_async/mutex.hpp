@@ -15,7 +15,11 @@
 #pragma once
 
 #include <coroutine>
+#include <memory>
 #include <queue>
+
+#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -26,7 +30,13 @@ class Mutex
 {
   CoContext & ctx_;
   bool locked_ = false;
-  std::queue<std::coroutine_handle<>> waiters_;
+
+  struct Waiter
+  {
+    std::coroutine_handle<> handle;
+    std::shared_ptr<bool> active;
+  };
+  std::queue<Waiter> waiters_;
 
 public:
   explicit Mutex(CoContext & ctx) : ctx_(ctx) {}
@@ -36,9 +46,16 @@ public:
   struct LockAwaiter
   {
     Mutex & mutex;
+    CancellationToken * token = nullptr;
+    std::shared_ptr<bool> active;
+
+    void set_token(CancellationToken * t) { token = t; }
 
     bool await_ready()
     {
+      if (token && token->is_cancelled()) {
+        return true;
+      }
       if (!mutex.locked_) {
         mutex.locked_ = true;
         return true;
@@ -46,11 +63,18 @@ public:
       return false;
     }
 
-    void await_suspend(std::coroutine_handle<> h) { mutex.waiters_.push(h); }
-    void await_resume() {}
+    void await_suspend(std::coroutine_handle<> h);
+
+    Result<void> await_resume()
+    {
+      if (token && token->is_cancelled() && !(active && *active)) {
+        return Result<void>::Cancelled();
+      }
+      return Result<void>::Ok();
+    }
   };
 
-  LockAwaiter lock() { return LockAwaiter{*this}; }
+  LockAwaiter lock() { return LockAwaiter{*this, nullptr, nullptr}; }
 
   void unlock();
 };

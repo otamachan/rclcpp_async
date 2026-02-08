@@ -18,6 +18,9 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 
+#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/result.hpp"
+
 namespace rclcpp_async
 {
 
@@ -25,6 +28,7 @@ class CoContext;
 
 class TimerStream
 {
+  CoContext & ctx_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::coroutine_handle<> waiter_;
   int pending_ = 0;
@@ -32,14 +36,22 @@ class TimerStream
   friend class CoContext;
 
 public:
-  TimerStream() = default;
+  explicit TimerStream(CoContext & ctx) : ctx_(ctx) {}
 
   struct NextAwaiter
   {
     TimerStream & stream;
+    CancellationToken * token = nullptr;
+    bool cancelled = false;
+
+    void set_token(CancellationToken * t) { token = t; }
 
     bool await_ready()
     {
+      if (token && token->is_cancelled()) {
+        cancelled = true;
+        return true;
+      }
       if (stream.pending_ > 0) {
         stream.pending_--;
         return true;
@@ -47,11 +59,18 @@ public:
       return false;
     }
 
-    void await_suspend(std::coroutine_handle<> h) { stream.waiter_ = h; }
-    void await_resume() {}
+    void await_suspend(std::coroutine_handle<> h);
+
+    Result<void> await_resume()
+    {
+      if (cancelled) {
+        return Result<void>::Cancelled();
+      }
+      return Result<void>::Ok();
+    }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this}; }
+  NextAwaiter next() { return NextAwaiter{*this, nullptr, false}; }
 
   void cancel()
   {

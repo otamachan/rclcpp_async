@@ -143,3 +143,33 @@ TEST_F(SendRequestTest, AlreadyCancelledIsImmediate)
   ASSERT_TRUE(running.handle.done());
   EXPECT_TRUE(result.cancelled());
 }
+
+TEST_F(SendRequestTest, CancelDuringSendRequest)
+{
+  // Use a timer to cancel the task while send_request is suspended.
+  // The service is not discovered yet, so the request will be pending.
+  // Create a client for a non-existent service to ensure the request stays pending.
+  auto orphan_client = node_->create_client<SetBool>("nonexistent_service");
+
+  Result<SetBool::Response::SharedPtr> result;
+  auto coro = [&]() -> Task<void> {
+    auto req = std::make_shared<SetBool::Request>();
+    req->data = true;
+    result = co_await ctx_->send_request<SetBool>(orphan_client, req);
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Let the coroutine suspend on send_request
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running.cancel();
+  spin_until_done(running);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(result.cancelled());
+}

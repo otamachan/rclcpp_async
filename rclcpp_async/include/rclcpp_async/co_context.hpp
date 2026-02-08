@@ -143,7 +143,8 @@ public:
     typename rclcpp::Client<ServiceT>::SharedPtr client,
     typename ServiceT::Request::SharedPtr request)
   {
-    return SendRequestAwaiter<ServiceT>{*this, std::move(client), std::move(request), nullptr, {}};
+    return SendRequestAwaiter<ServiceT>{
+      *this, std::move(client), std::move(request), nullptr, {}, false};
   }
 
   SleepAwaiter sleep(std::chrono::nanoseconds duration)
@@ -183,7 +184,7 @@ public:
     typename rclcpp_action::Client<ActionT>::SharedPtr client, typename ActionT::Goal goal)
   {
     return SendGoalAwaiter<ActionT>{*this,   std::move(client), std::move(goal),
-                                    nullptr, nullptr,           {}};
+                                    nullptr, nullptr,           {},              false};
   }
 
   template <typename ServiceT, typename CallbackT>
@@ -210,7 +211,7 @@ public:
 
   std::shared_ptr<TimerStream> create_timer(std::chrono::nanoseconds period)
   {
-    auto stream = std::make_shared<TimerStream>();
+    auto stream = std::make_shared<TimerStream>(*this);
     stream->timer_ = node_->create_wall_timer(period, [s = stream, this]() {
       if (s->waiter_) {
         auto w = s->waiter_;
@@ -302,9 +303,26 @@ void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
 {
   client->async_send_request(
     request, [this, h](typename rclcpp::Client<ServiceT>::SharedFuture future) {
+      if (done) {
+        return;
+      }
+      done = true;
       result = Result<Response>::Ok(future.get());
       ctx.resume(h);
     });
+
+  if (token) {
+    token->on_cancel([this, h]() {
+      ctx.post([this, h]() {
+        if (done) {
+          return;
+        }
+        done = true;
+        result = Result<Response>::Cancelled();
+        ctx.resume(h);
+      });
+    });
+  }
 }
 
 inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
@@ -357,6 +375,24 @@ void WaitForActionAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 }
 
 template <typename MsgT>
+void TopicStream<MsgT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  stream.waiter_ = h;
+  if (token) {
+    token->on_cancel([this, h]() {
+      stream.ctx_.post([this, h]() {
+        if (stream.waiter_ != h) {
+          return;
+        }
+        stream.waiter_ = nullptr;
+        cancelled = true;
+        stream.ctx_.resume(h);
+      });
+    });
+  }
+}
+
+template <typename MsgT>
 void TopicStream<MsgT>::close()
 {
   closed_ = true;
@@ -371,6 +407,24 @@ template <typename ActionT>
 void GoalStream<ActionT>::resume_waiter(std::coroutine_handle<> h)
 {
   ctx_.resume(h);
+}
+
+template <typename ActionT>
+void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  stream.waiter_ = h;
+  if (token) {
+    token->on_cancel([this, h]() {
+      stream.ctx_.post([this, h]() {
+        if (stream.waiter_ != h) {
+          return;
+        }
+        stream.waiter_ = nullptr;
+        cancelled = true;
+        stream.ctx_.resume(h);
+      });
+    });
+  }
 }
 
 template <typename ActionT>
@@ -405,6 +459,10 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
   };
 
   options.goal_response_callback = [this, h](const auto & goal_handle) {
+    if (done) {
+      return;
+    }
+    done = true;
     if (!goal_handle) {
       result = Result<std::shared_ptr<GoalStream<ActionT>>>::Error("goal rejected");
     } else {
@@ -416,36 +474,142 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
   };
 
   client->async_send_goal(goal, options);
+
+  if (token) {
+    token->on_cancel([this, h]() {
+      ctx.post([this, h]() {
+        if (done) {
+          return;
+        }
+        done = true;
+        result = Result<std::shared_ptr<GoalStream<ActionT>>>::Cancelled();
+        ctx.resume(h);
+      });
+    });
+  }
 }
 
 // ============================================================
 // Event / Mutex implementations (need full CoContext)
 // ============================================================
 
+inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  active = std::make_shared<bool>(true);
+  event.waiters_.push({h, active});
+  if (token) {
+    auto a = active;
+    token->on_cancel([this, h, a]() {
+      event.ctx_.post([this, h, a]() {
+        if (!*a) {
+          return;
+        }
+        *a = false;
+        event.ctx_.resume(h);
+      });
+    });
+  }
+}
+
 inline void Event::set()
 {
   set_ = true;
   while (!waiters_.empty()) {
-    auto h = waiters_.front();
+    auto w = waiters_.front();
     waiters_.pop();
-    ctx_.resume(h);
+    if (*w.active) {
+      *w.active = false;
+      ctx_.resume(w.handle);
+    }
+  }
+}
+
+inline void Mutex::LockAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  active = std::make_shared<bool>(true);
+  mutex.waiters_.push({h, active});
+  if (token) {
+    auto a = active;
+    token->on_cancel([this, h, a]() {
+      mutex.ctx_.post([this, h, a]() {
+        if (!*a) {
+          return;
+        }
+        *a = false;
+        mutex.ctx_.resume(h);
+      });
+    });
   }
 }
 
 inline void Mutex::unlock()
 {
-  if (!waiters_.empty()) {
-    auto h = waiters_.front();
+  while (!waiters_.empty()) {
+    auto w = waiters_.front();
     waiters_.pop();
-    ctx_.resume(h);
-  } else {
-    locked_ = false;
+    if (*w.active) {
+      *w.active = false;
+      ctx_.resume(w.handle);
+      return;
+    }
+  }
+  locked_ = false;
+}
+
+// ============================================================
+// TimerStream await_suspend (need full CoContext)
+// ============================================================
+
+inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  stream.waiter_ = h;
+  if (token) {
+    token->on_cancel([this, h]() {
+      stream.ctx_.post([this, h]() {
+        if (stream.waiter_ != h) {
+          return;
+        }
+        stream.waiter_ = nullptr;
+        cancelled = true;
+        stream.ctx_.resume(h);
+      });
+    });
   }
 }
 
 // ============================================================
 // Channel implementations (need full CoContext)
 // ============================================================
+
+template <typename T>
+bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  {
+    std::lock_guard lock(ch.mutex_);
+    if (!ch.queue_.empty() || ch.closed_) {
+      return false;  // don't suspend, data already available
+    }
+    ch.waiter_ = h;
+  }  // release ch.mutex_ before on_cancel to avoid deadlock
+  if (token) {
+    token->on_cancel([this, h]() {
+      std::coroutine_handle<> w;
+      {
+        std::lock_guard lock(ch.mutex_);
+        if (ch.waiter_ != h) {
+          return;
+        }
+        w = ch.waiter_;
+        ch.waiter_ = nullptr;
+      }
+      if (w) {
+        cancelled = true;
+        ch.ctx_.post([w]() { w.resume(); });
+      }
+    });
+  }
+  return true;
+}
 
 template <typename T>
 void Channel<T>::send(T value)

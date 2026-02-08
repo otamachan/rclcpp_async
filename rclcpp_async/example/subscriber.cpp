@@ -22,8 +22,13 @@ rclcpp_async::Task<void> listen(rclcpp_async::CoContext & ctx, std::string topic
 {
   auto stream = ctx.subscribe<std_msgs::msg::String>(topic, 10);
 
-  while (auto msg = co_await stream->next()) {
-    RCLCPP_INFO(ctx.node()->get_logger(), "[%s] %s", topic.c_str(), (*msg)->data.c_str());
+  while (true) {
+    auto r = co_await stream->next();
+    if (!r.ok() || !r.value->has_value()) {
+      break;
+    }
+    auto & data = (*r.value.value())->data;
+    RCLCPP_INFO(ctx.node()->get_logger(), "[%s] %s", topic.c_str(), data.c_str());
   }
 }
 

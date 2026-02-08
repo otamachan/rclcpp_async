@@ -20,6 +20,9 @@
 #include <queue>
 #include <utility>
 
+#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/result.hpp"
+
 namespace rclcpp_async
 {
 
@@ -43,36 +46,39 @@ public:
   struct NextAwaiter
   {
     Channel & ch;
+    CancellationToken * token = nullptr;
+    bool cancelled = false;
+
+    void set_token(CancellationToken * t) { token = t; }
 
     bool await_ready()
     {
+      if (token && token->is_cancelled()) {
+        cancelled = true;
+        return true;
+      }
       std::lock_guard lock(ch.mutex_);
       return !ch.queue_.empty() || ch.closed_;
     }
 
-    bool await_suspend(std::coroutine_handle<> h)
-    {
-      std::lock_guard lock(ch.mutex_);
-      if (!ch.queue_.empty() || ch.closed_) {
-        return false;  // don't suspend, data already available
-      }
-      ch.waiter_ = h;
-      return true;
-    }
+    bool await_suspend(std::coroutine_handle<> h);
 
-    std::optional<T> await_resume()
+    Result<std::optional<T>> await_resume()
     {
+      if (cancelled) {
+        return Result<std::optional<T>>::Cancelled();
+      }
       std::lock_guard lock(ch.mutex_);
       if (ch.queue_.empty()) {
-        return std::nullopt;
+        return Result<std::optional<T>>::Ok(std::nullopt);
       }
       auto val = std::move(ch.queue_.front());
       ch.queue_.pop();
-      return val;
+      return Result<std::optional<T>>::Ok(std::move(val));
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this}; }
+  NextAwaiter next() { return NextAwaiter{*this, nullptr, false}; }
 };
 
 }  // namespace rclcpp_async

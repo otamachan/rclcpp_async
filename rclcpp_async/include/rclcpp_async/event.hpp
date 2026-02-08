@@ -15,7 +15,11 @@
 #pragma once
 
 #include <coroutine>
+#include <memory>
 #include <queue>
+
+#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -26,7 +30,13 @@ class Event
 {
   CoContext & ctx_;
   bool set_ = false;
-  std::queue<std::coroutine_handle<>> waiters_;
+
+  struct Waiter
+  {
+    std::coroutine_handle<> handle;
+    std::shared_ptr<bool> active;
+  };
+  std::queue<Waiter> waiters_;
 
 public:
   explicit Event(CoContext & ctx) : ctx_(ctx) {}
@@ -40,13 +50,31 @@ public:
   struct WaitAwaiter
   {
     Event & event;
+    CancellationToken * token = nullptr;
+    std::shared_ptr<bool> active;
 
-    bool await_ready() { return event.set_; }
-    void await_suspend(std::coroutine_handle<> h) { event.waiters_.push(h); }
-    void await_resume() {}
+    void set_token(CancellationToken * t) { token = t; }
+
+    bool await_ready()
+    {
+      if (token && token->is_cancelled()) {
+        return true;
+      }
+      return event.set_;
+    }
+
+    void await_suspend(std::coroutine_handle<> h);
+
+    Result<void> await_resume()
+    {
+      if (token && token->is_cancelled()) {
+        return Result<void>::Cancelled();
+      }
+      return Result<void>::Ok();
+    }
   };
 
-  WaitAwaiter wait() { return WaitAwaiter{*this}; }
+  WaitAwaiter wait() { return WaitAwaiter{*this, nullptr, nullptr}; }
 };
 
 }  // namespace rclcpp_async

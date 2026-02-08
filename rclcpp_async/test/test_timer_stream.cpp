@@ -49,6 +49,15 @@ protected:
     }
   }
 
+  void spin_until_done(Task<void> & task, std::chrono::seconds timeout = 5s)
+  {
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
+      rclcpp::spin_some(node_);
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
 };
@@ -127,4 +136,31 @@ TEST_F(TimerStreamTest, PendingAccumulation)
 
   EXPECT_TRUE(done);
   EXPECT_EQ(tick_count, 2);
+}
+
+TEST_F(TimerStreamTest, CancelDuringNext)
+{
+  bool was_cancelled = false;
+
+  auto coro = [&]() -> Task<void> {
+    auto timer = ctx_->create_timer(10s);  // Very long period — will be suspended
+    auto r = co_await timer->next();
+    was_cancelled = r.cancelled();
+    timer->cancel();
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Let coroutine suspend on next()
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running.cancel();
+  spin_until_done(running);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
 }

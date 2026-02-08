@@ -61,9 +61,10 @@ TEST_F(ChannelTest, SendThenNext)
 
   int received = 0;
   auto coro = [&]() -> Task<void> {
-    auto val = co_await ch.next();
-    EXPECT_TRUE(val.has_value());
-    received = *val;
+    auto r = co_await ch.next();
+    EXPECT_TRUE(r.ok());
+    EXPECT_TRUE(r.value->has_value());
+    received = *r.value.value();
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
@@ -78,9 +79,10 @@ TEST_F(ChannelTest, NextThenSend)
 
   int received = 0;
   auto coro = [&]() -> Task<void> {
-    auto val = co_await ch.next();
-    EXPECT_TRUE(val.has_value());
-    received = *val;
+    auto r = co_await ch.next();
+    EXPECT_TRUE(r.ok());
+    EXPECT_TRUE(r.value->has_value());
+    received = *r.value.value();
   };
   auto task = ctx_->create_task(coro());
 
@@ -108,9 +110,10 @@ TEST_F(ChannelTest, MultipleMessages)
   std::vector<int> received;
   auto coro = [&]() -> Task<void> {
     for (int i = 0; i < 3; i++) {
-      auto val = co_await ch.next();
-      EXPECT_TRUE(val.has_value());
-      received.push_back(*val);
+      auto r = co_await ch.next();
+      EXPECT_TRUE(r.ok());
+      EXPECT_TRUE(r.value->has_value());
+      received.push_back(*r.value.value());
     }
   };
   auto task = ctx_->create_task(coro());
@@ -130,8 +133,8 @@ TEST_F(ChannelTest, CloseReturnsNullopt)
 
   bool got_nullopt = false;
   auto coro = [&]() -> Task<void> {
-    auto val = co_await ch.next();
-    got_nullopt = !val.has_value();
+    auto r = co_await ch.next();
+    got_nullopt = r.ok() && !r.value->has_value();
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
@@ -146,9 +149,10 @@ TEST_F(ChannelTest, SendFromThread)
 
   int received = 0;
   auto coro = [&]() -> Task<void> {
-    auto val = co_await ch.next();
-    EXPECT_TRUE(val.has_value());
-    received = *val;
+    auto r = co_await ch.next();
+    EXPECT_TRUE(r.ok());
+    EXPECT_TRUE(r.value->has_value());
+    received = *r.value.value();
   };
   auto task = ctx_->create_task(coro());
 
@@ -170,8 +174,15 @@ TEST_F(ChannelTest, StreamFromThread)
 
   std::vector<int> received;
   auto coro = [&]() -> Task<void> {
-    while (auto val = co_await ch.next()) {
-      received.push_back(*val);
+    while (true) {
+      auto r = co_await ch.next();
+      if (r.cancelled() || !r.ok()) {
+        break;
+      }
+      if (!r.value->has_value()) {
+        break;
+      }
+      received.push_back(*r.value.value());
     }
   };
   auto task = ctx_->create_task(coro());
@@ -193,4 +204,61 @@ TEST_F(ChannelTest, StreamFromThread)
   for (int i = 0; i < 5; i++) {
     EXPECT_EQ(received[i], i);
   }
+}
+
+TEST_F(ChannelTest, CancelDuringNext)
+{
+  Channel<int> ch(*ctx_);
+
+  bool was_cancelled = false;
+  auto coro = [&]() -> Task<void> {
+    auto r = co_await ch.next();
+    was_cancelled = r.cancelled();
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Spin a bit — task should be suspended
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  running.cancel();
+  spin_until_done(running);
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
+}
+
+TEST_F(ChannelTest, CancelFromThread)
+{
+  Channel<int> ch(*ctx_);
+
+  bool was_cancelled = false;
+  auto coro = [&]() -> Task<void> {
+    auto r = co_await ch.next();
+    was_cancelled = r.cancelled();
+  };
+
+  auto task = coro();
+  auto running = ctx_->create_task(std::move(task));
+
+  // Spin a bit — task should be suspended
+  for (int i = 0; i < 10; i++) {
+    rclcpp::spin_some(node_);
+    std::this_thread::sleep_for(1ms);
+  }
+
+  std::thread t([&running]() {
+    std::this_thread::sleep_for(50ms);
+    running.cancel();
+  });
+
+  spin_until_done(running);
+  t.join();
+
+  ASSERT_TRUE(running.handle.done());
+  EXPECT_TRUE(was_cancelled);
 }
