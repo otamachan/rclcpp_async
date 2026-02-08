@@ -15,6 +15,7 @@
 #pragma once
 
 #include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/channel.hpp"
 #include "rclcpp_async/co_context.hpp"
 #include "rclcpp_async/event.hpp"
 #include "rclcpp_async/goal_context.hpp"

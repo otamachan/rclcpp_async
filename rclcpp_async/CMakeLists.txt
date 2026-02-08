@@ -133,6 +133,9 @@ if(BUILD_TESTING)
   ament_add_ros_isolated_gtest(test_create_action_server test/test_create_action_server.cpp)
   target_link_libraries(test_create_action_server ${PROJECT_NAME})
   ament_target_dependencies(test_create_action_server example_interfaces)
+
+  ament_add_ros_isolated_gtest(test_channel test/test_channel.cpp)
+  target_link_libraries(test_channel ${PROJECT_NAME})
 endif()
 
 ament_package()

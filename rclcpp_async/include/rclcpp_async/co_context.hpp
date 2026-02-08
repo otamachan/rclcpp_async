@@ -27,6 +27,7 @@
 #include <utility>
 
 #include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/channel.hpp"
 #include "rclcpp_async/event.hpp"
 #include "rclcpp_async/goal_context.hpp"
 #include "rclcpp_async/goal_stream.hpp"
@@ -439,6 +440,43 @@ inline void Mutex::unlock()
     ctx_.resume(h);
   } else {
     locked_ = false;
+  }
+}
+
+// ============================================================
+// Channel implementations (need full CoContext)
+// ============================================================
+
+template <typename T>
+void Channel<T>::send(T value)
+{
+  std::coroutine_handle<> w;
+  {
+    std::lock_guard lock(mutex_);
+    if (closed_) {
+      return;
+    }
+    queue_.push(std::move(value));
+    w = waiter_;
+    waiter_ = nullptr;
+  }
+  if (w) {
+    ctx_.post([w]() { w.resume(); });
+  }
+}
+
+template <typename T>
+void Channel<T>::close()
+{
+  std::coroutine_handle<> w;
+  {
+    std::lock_guard lock(mutex_);
+    closed_ = true;
+    w = waiter_;
+    waiter_ = nullptr;
+  }
+  if (w) {
+    ctx_.post([w]() { w.resume(); });
   }
 }
 
