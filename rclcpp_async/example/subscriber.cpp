@@ -38,7 +38,7 @@ int main(int argc, char * argv[])
   auto node = std::make_shared<rclcpp::Node>("async_subscriber");
   rclcpp_async::CoContext ctx(node);
 
-  // 2つのトピックを並列で購読
+  // Subscribe to two topics in parallel
   auto task_a = ctx.create_task(listen(ctx, "topic_a"));
   auto task_b = ctx.create_task(listen(ctx, "topic_b"));
 
