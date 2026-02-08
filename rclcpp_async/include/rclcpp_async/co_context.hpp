@@ -470,7 +470,12 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
       stream->client_ = client;
       result = Result<std::shared_ptr<GoalStream<ActionT>>>::Ok(stream);
     }
-    ctx.resume(h);
+    // Use post() instead of resume() to defer coroutine resumption.
+    // rclcpp_action holds goal_requests_mutex during this callback
+    // (Jazzy bug: https://github.com/ros2/rclcpp/issues/2796).
+    // Resuming synchronously here would deadlock if the coroutine
+    // immediately calls async_send_goal again.
+    ctx.post([&ctx = ctx, h]() { ctx.resume(h); });
   };
 
   client->async_send_goal(goal, options);

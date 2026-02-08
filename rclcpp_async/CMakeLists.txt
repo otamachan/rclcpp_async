@@ -136,6 +136,10 @@ if(BUILD_TESTING)
 
   ament_add_ros_isolated_gtest(test_channel test/test_channel.cpp)
   target_link_libraries(test_channel ${PROJECT_NAME})
+
+  ament_add_ros_isolated_gtest(test_chained_goals test/test_chained_goals.cpp)
+  target_link_libraries(test_chained_goals ${PROJECT_NAME})
+  ament_target_dependencies(test_chained_goals example_interfaces)
 endif()
 
 ament_package()
