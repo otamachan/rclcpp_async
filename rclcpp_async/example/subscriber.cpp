@@ -18,10 +18,7 @@
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
-using rclcpp_async::CoContext;  // NOLINT(build/namespaces)
-using rclcpp_async::Task;       // NOLINT(build/namespaces)
-
-Task<void> listen(CoContext & ctx, std::string topic)
+rclcpp_async::Task<void> listen(rclcpp_async::CoContext & ctx, std::string topic)
 {
   auto stream = ctx.subscribe<std_msgs::msg::String>(topic, 10);
 
@@ -34,7 +31,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("async_subscriber");
-  CoContext ctx(node);
+  rclcpp_async::CoContext ctx(node);
 
   // 2つのトピックを並列で購読
   auto task_a = ctx.create_task(listen(ctx, "topic_a"));

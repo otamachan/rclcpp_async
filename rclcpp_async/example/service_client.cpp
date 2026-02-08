@@ -18,11 +18,9 @@
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
-using rclcpp_async::CoContext;  // NOLINT(build/namespaces)
-using rclcpp_async::Task;       // NOLINT(build/namespaces)
 using SetBool = std_srvs::srv::SetBool;
 
-Task<void> run(CoContext & ctx)
+rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
 {
   auto client = ctx.node()->create_client<SetBool>("set_bool");
 
@@ -59,7 +57,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("service_client");
-  CoContext ctx(node);
+  rclcpp_async::CoContext ctx(node);
 
   auto task = ctx.create_task(run(ctx));
 

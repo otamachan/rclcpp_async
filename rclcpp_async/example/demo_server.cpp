@@ -23,9 +23,6 @@
 #include "rclcpp_async/rclcpp_async.hpp"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces)
-using rclcpp_async::CoContext;         // NOLINT(build/namespaces)
-using rclcpp_async::GoalContext;       // NOLINT(build/namespaces)
-using rclcpp_async::Task;              // NOLINT(build/namespaces)
 using SetBool = std_srvs::srv::SetBool;
 using Fibonacci = example_interfaces::action::Fibonacci;
 
@@ -33,38 +30,46 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("demo_server");
-  CoContext ctx(node);
+  rclcpp_async::CoContext ctx(node);
 
   // Service: set_bool (coroutine)
   auto service = ctx.create_service<SetBool>(
-    "set_bool", [&node](SetBool::Request::SharedPtr req) -> Task<SetBool::Response> {
+    "set_bool",
+    [&ctx](SetBool::Request::SharedPtr req)
+      -> rclcpp_async::Task<SetBool::Response> {
       SetBool::Response resp;
       resp.success = req->data;
       resp.message = req->data ? "enabled" : "disabled";
       RCLCPP_INFO(
-        node->get_logger(), "Request: %s -> %s", req->data ? "true" : "false",
-        resp.message.c_str());
+        ctx.node()->get_logger(), "Request: %s -> %s",
+        req->data ? "true" : "false", resp.message.c_str());
       co_return resp;
     });
   RCLCPP_INFO(node->get_logger(), "Service 'set_bool' ready");
 
   // Action: fibonacci (coroutine)
   auto action_server = ctx.create_action_server<Fibonacci>(
-    "fibonacci", [&ctx, &node](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
-      RCLCPP_INFO(node->get_logger(), "Received goal: order=%d", goal.goal().order);
+    "fibonacci",
+    [&ctx](rclcpp_async::GoalContext<Fibonacci> goal)
+      -> rclcpp_async::Task<Fibonacci::Result> {
+      auto logger = ctx.node()->get_logger();
+      RCLCPP_INFO(logger, "Received goal: order=%d", goal.goal().order);
 
       Fibonacci::Feedback feedback;
       feedback.sequence = {0, 1};
 
       for (int i = 2; i < goal.goal().order; i++) {
         if (goal.is_canceling()) {
-          RCLCPP_INFO(node->get_logger(), "Goal canceled at step %d", i);
+          RCLCPP_INFO(logger, "Goal canceled at step %d", i);
           break;
         }
         auto n = feedback.sequence.size();
-        feedback.sequence.push_back(feedback.sequence[n - 1] + feedback.sequence[n - 2]);
+        feedback.sequence.push_back(
+          feedback.sequence[n - 1] + feedback.sequence[n - 2]);
         goal.publish_feedback(feedback);
-        RCLCPP_INFO(node->get_logger(), "Feedback: sequence[%d] = %d", i, feedback.sequence.back());
+        RCLCPP_INFO(
+          logger, "Feedback: sequence[%d] = %d",
+          i, feedback.sequence.back());
         co_await ctx.sleep(500ms);
       }
 
@@ -75,7 +80,7 @@ int main(int argc, char * argv[])
   RCLCPP_INFO(node->get_logger(), "Action 'fibonacci' ready");
 
   // Publisher: topic_a (1s interval, timer stream)
-  auto task_a = ctx.create_task([&ctx]() -> Task<void> {
+  auto task_a = ctx.create_task([&ctx]() -> rclcpp_async::Task<void> {
     auto n = ctx.node();
     auto pub = n->create_publisher<std_msgs::msg::String>("topic_a", 10);
     auto timer = ctx.create_timer(1s);
@@ -84,13 +89,15 @@ int main(int argc, char * argv[])
       co_await timer->next();
       auto msg = std_msgs::msg::String();
       msg.data = "Hello from A: " + std::to_string(count++);
-      RCLCPP_INFO(n->get_logger(), "Publishing to topic_a: '%s'", msg.data.c_str());
+      RCLCPP_INFO(
+        n->get_logger(), "Publishing to topic_a: '%s'",
+        msg.data.c_str());
       pub->publish(msg);
     }
   });
 
   // Publisher: topic_b (700ms interval, timer stream)
-  auto task_b = ctx.create_task([&ctx]() -> Task<void> {
+  auto task_b = ctx.create_task([&ctx]() -> rclcpp_async::Task<void> {
     auto n = ctx.node();
     auto pub = n->create_publisher<std_msgs::msg::String>("topic_b", 10);
     auto timer = ctx.create_timer(700ms);
@@ -99,7 +106,9 @@ int main(int argc, char * argv[])
       co_await timer->next();
       auto msg = std_msgs::msg::String();
       msg.data = "Hello from B: " + std::to_string(count++);
-      RCLCPP_INFO(n->get_logger(), "Publishing to topic_b: '%s'", msg.data.c_str());
+      RCLCPP_INFO(
+        n->get_logger(), "Publishing to topic_b: '%s'",
+        msg.data.c_str());
       pub->publish(msg);
     }
   });

@@ -71,7 +71,11 @@ if(BUILD_TESTING)
   target_link_libraries(action_client ${PROJECT_NAME})
   ament_target_dependencies(action_client example_interfaces)
 
-  install(TARGETS demo_server subscriber service_client action_client
+  add_executable(nested_demo example/nested_demo.cpp)
+  target_link_libraries(nested_demo ${PROJECT_NAME})
+  ament_target_dependencies(nested_demo std_srvs example_interfaces)
+
+  install(TARGETS demo_server subscriber service_client action_client nested_demo
     DESTINATION lib/${PROJECT_NAME}
   )
 

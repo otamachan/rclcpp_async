@@ -19,11 +19,9 @@
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
-using rclcpp_async::CoContext;  // NOLINT(build/namespaces)
-using rclcpp_async::Task;       // NOLINT(build/namespaces)
 using Fibonacci = example_interfaces::action::Fibonacci;
 
-Task<void> run(CoContext & ctx)
+rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
 {
   auto client = rclcpp_action::create_client<Fibonacci>(ctx.node(), "fibonacci");
 
@@ -69,7 +67,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("action_client");
-  CoContext ctx(node);
+  rclcpp_async::CoContext ctx(node);
 
   auto task = ctx.create_task(run(ctx));
 
