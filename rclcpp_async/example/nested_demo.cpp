@@ -126,6 +126,7 @@ int main(int argc, char * argv[])
       // Compute fibonacci with feedback
       Fibonacci::Feedback feedback;
       feedback.sequence = {0, 1};
+      auto timer = ctx.create_timer(200ms);
 
       for (int i = 2; i < goal.goal().order; i++) {
         if (goal.is_canceling()) {
@@ -138,7 +139,7 @@ int main(int argc, char * argv[])
         goal.publish_feedback(feedback);
         RCLCPP_INFO(logger, "[fibonacci] feedback: seq[%d] = %d",
           i, feedback.sequence.back());
-        co_await ctx.sleep(200ms);
+        co_await timer->next();
       }
 
       Fibonacci::Result result;
