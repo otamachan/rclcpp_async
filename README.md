@@ -329,6 +329,33 @@ auto task = ctx.create_task([&]() -> Task<void> {
 });
 ```
 
+### when_all
+
+`when_all` concurrently awaits multiple tasks and returns all results as a `std::tuple`.
+
+```cpp
+Task<int> fetch_a(CoContext & ctx) {
+  co_await ctx.sleep(std::chrono::seconds(1));
+  co_return 42;
+}
+
+Task<std::string> fetch_b(CoContext & ctx) {
+  co_await ctx.sleep(std::chrono::seconds(2));
+  co_return std::string("hello");
+}
+
+Task<void> run(CoContext & ctx)
+{
+  auto [a, b] = co_await when_all(
+    ctx.create_task(fetch_a(ctx)),
+    ctx.create_task(fetch_b(ctx)));
+  // a == 42, b == "hello"
+  // Total time ~2s (parallel), not 3s (sequential)
+}
+```
+
+`void` tasks return `std::monostate` in the tuple. Cancellation of the parent task propagates to all child tasks.
+
 ## Result Type
 
 All `co_await` operations return `Result<T>`, which carries the outcome status:
