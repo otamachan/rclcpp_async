@@ -8,7 +8,7 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -fcoroutines)
+  add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations -fcoroutines)
 endif()
 
 find_package(ament_cmake REQUIRED)
@@ -56,24 +56,21 @@ if(BUILD_TESTING)
 
   # Examples
   add_executable(demo_server example/demo_server.cpp)
-  target_link_libraries(demo_server ${PROJECT_NAME})
-  ament_target_dependencies(demo_server std_msgs std_srvs example_interfaces)
+  target_link_libraries(demo_server ${PROJECT_NAME}
+    std_msgs::std_msgs std_srvs::std_srvs example_interfaces::example_interfaces)
 
   add_executable(subscriber example/subscriber.cpp)
-  target_link_libraries(subscriber ${PROJECT_NAME})
-  ament_target_dependencies(subscriber std_msgs)
+  target_link_libraries(subscriber ${PROJECT_NAME} std_msgs::std_msgs)
 
   add_executable(service_client example/service_client.cpp)
-  target_link_libraries(service_client ${PROJECT_NAME})
-  ament_target_dependencies(service_client std_srvs)
+  target_link_libraries(service_client ${PROJECT_NAME} std_srvs::std_srvs)
 
   add_executable(action_client example/action_client.cpp)
-  target_link_libraries(action_client ${PROJECT_NAME})
-  ament_target_dependencies(action_client example_interfaces)
+  target_link_libraries(action_client ${PROJECT_NAME} example_interfaces::example_interfaces)
 
   add_executable(nested_demo example/nested_demo.cpp)
-  target_link_libraries(nested_demo ${PROJECT_NAME})
-  ament_target_dependencies(nested_demo std_srvs example_interfaces)
+  target_link_libraries(nested_demo ${PROJECT_NAME}
+    std_srvs::std_srvs example_interfaces::example_interfaces)
 
   install(TARGETS demo_server subscriber service_client action_client nested_demo
     DESTINATION lib/${PROJECT_NAME}
@@ -98,28 +95,22 @@ if(BUILD_TESTING)
   target_link_libraries(test_sleep ${PROJECT_NAME})
 
   ament_add_ros_isolated_gtest(test_wait_for_service test/test_wait_for_service.cpp)
-  target_link_libraries(test_wait_for_service ${PROJECT_NAME})
-  ament_target_dependencies(test_wait_for_service std_srvs)
+  target_link_libraries(test_wait_for_service ${PROJECT_NAME} std_srvs::std_srvs)
 
   ament_add_ros_isolated_gtest(test_wait_for_action test/test_wait_for_action.cpp)
-  target_link_libraries(test_wait_for_action ${PROJECT_NAME})
-  ament_target_dependencies(test_wait_for_action example_interfaces)
+  target_link_libraries(test_wait_for_action ${PROJECT_NAME} example_interfaces::example_interfaces)
 
   ament_add_ros_isolated_gtest(test_send_request test/test_send_request.cpp)
-  target_link_libraries(test_send_request ${PROJECT_NAME})
-  ament_target_dependencies(test_send_request std_srvs)
+  target_link_libraries(test_send_request ${PROJECT_NAME} std_srvs::std_srvs)
 
   ament_add_ros_isolated_gtest(test_topic_stream test/test_topic_stream.cpp)
-  target_link_libraries(test_topic_stream ${PROJECT_NAME})
-  ament_target_dependencies(test_topic_stream std_msgs)
+  target_link_libraries(test_topic_stream ${PROJECT_NAME} std_msgs::std_msgs)
 
   ament_add_ros_isolated_gtest(test_goal_stream test/test_goal_stream.cpp)
-  target_link_libraries(test_goal_stream ${PROJECT_NAME})
-  ament_target_dependencies(test_goal_stream example_interfaces)
+  target_link_libraries(test_goal_stream ${PROJECT_NAME} example_interfaces::example_interfaces)
 
   ament_add_ros_isolated_gtest(test_create_service test/test_create_service.cpp)
-  target_link_libraries(test_create_service ${PROJECT_NAME})
-  ament_target_dependencies(test_create_service std_srvs)
+  target_link_libraries(test_create_service ${PROJECT_NAME} std_srvs::std_srvs)
 
   ament_add_ros_isolated_gtest(test_event test/test_event.cpp)
   target_link_libraries(test_event ${PROJECT_NAME})
@@ -131,15 +122,13 @@ if(BUILD_TESTING)
   target_link_libraries(test_timer_stream ${PROJECT_NAME})
 
   ament_add_ros_isolated_gtest(test_create_action_server test/test_create_action_server.cpp)
-  target_link_libraries(test_create_action_server ${PROJECT_NAME})
-  ament_target_dependencies(test_create_action_server example_interfaces)
+  target_link_libraries(test_create_action_server ${PROJECT_NAME} example_interfaces::example_interfaces)
 
   ament_add_ros_isolated_gtest(test_channel test/test_channel.cpp)
   target_link_libraries(test_channel ${PROJECT_NAME})
 
   ament_add_ros_isolated_gtest(test_chained_goals test/test_chained_goals.cpp)
-  target_link_libraries(test_chained_goals ${PROJECT_NAME})
-  ament_target_dependencies(test_chained_goals example_interfaces)
+  target_link_libraries(test_chained_goals ${PROJECT_NAME} example_interfaces::example_interfaces)
 endif()
 
 ament_package()

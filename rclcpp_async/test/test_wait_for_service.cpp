@@ -34,6 +34,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_wfs_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     client_ = node_->create_client<SetBool>("test_wfs_service");
   }
 
@@ -49,7 +50,7 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
@@ -65,6 +66,7 @@ protected:
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp::Client<SetBool>::SharedPtr client_;
   rclcpp::Service<SetBool>::SharedPtr service_;
 };
@@ -74,7 +76,7 @@ TEST_F(WaitForServiceTest, ServiceAlreadyReady)
   create_service();
   // Spin to discover the service
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (client_->service_is_ready()) {
       break;
@@ -98,7 +100,7 @@ TEST_F(WaitForServiceTest, ServiceBecomesReady)
 
   // Spin a bit, then create the service
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
   }
   create_service();
@@ -125,9 +127,9 @@ TEST_F(WaitForServiceTest, Cancel)
   auto coro = [&]() -> Task<void> { result = co_await ctx_->wait_for_service(client_, 10s); };
   auto task = ctx_->create_task(coro());
 
-  rclcpp::spin_some(node_);
+  executor_.spin_some();
   std::this_thread::sleep_for(10ms);
-  rclcpp::spin_some(node_);
+  executor_.spin_some();
 
   task.cancel();
   spin_until_done(task);

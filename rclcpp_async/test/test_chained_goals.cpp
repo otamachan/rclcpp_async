@@ -46,6 +46,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_chained_goals_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     action_client_ = rclcpp_action::create_client<Fibonacci>(node_, "test_chained_action");
   }
 
@@ -61,7 +62,7 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
@@ -69,7 +70,7 @@ protected:
   void wait_for_server()
   {
     for (int i = 0; i < 50; i++) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(10ms);
       if (action_client_->action_server_is_ready()) {
         break;
@@ -98,6 +99,7 @@ protected:
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp_action::Client<Fibonacci>::SharedPtr action_client_;
   rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
 };

@@ -34,15 +34,13 @@ int main(int argc, char * argv[])
 
   // Service: set_bool (coroutine)
   auto service = ctx.create_service<SetBool>(
-    "set_bool",
-    [&ctx](SetBool::Request::SharedPtr req)
-      -> rclcpp_async::Task<SetBool::Response> {
+    "set_bool", [&ctx](SetBool::Request::SharedPtr req) -> rclcpp_async::Task<SetBool::Response> {
       SetBool::Response resp;
       resp.success = req->data;
       resp.message = req->data ? "enabled" : "disabled";
       RCLCPP_INFO(
-        ctx.node()->get_logger(), "Request: %s -> %s",
-        req->data ? "true" : "false", resp.message.c_str());
+        ctx.node()->get_logger(), "Request: %s -> %s", req->data ? "true" : "false",
+        resp.message.c_str());
       co_return resp;
     });
   RCLCPP_INFO(node->get_logger(), "Service 'set_bool' ready");
@@ -50,8 +48,7 @@ int main(int argc, char * argv[])
   // Action: fibonacci (coroutine)
   auto action_server = ctx.create_action_server<Fibonacci>(
     "fibonacci",
-    [&ctx](rclcpp_async::GoalContext<Fibonacci> goal)
-      -> rclcpp_async::Task<Fibonacci::Result> {
+    [&ctx](rclcpp_async::GoalContext<Fibonacci> goal) -> rclcpp_async::Task<Fibonacci::Result> {
       auto logger = ctx.node()->get_logger();
       RCLCPP_INFO(logger, "Received goal: order=%d", goal.goal().order);
 
@@ -64,12 +61,9 @@ int main(int argc, char * argv[])
           break;
         }
         auto n = feedback.sequence.size();
-        feedback.sequence.push_back(
-          feedback.sequence[n - 1] + feedback.sequence[n - 2]);
+        feedback.sequence.push_back(feedback.sequence[n - 1] + feedback.sequence[n - 2]);
         goal.publish_feedback(feedback);
-        RCLCPP_INFO(
-          logger, "Feedback: sequence[%d] = %d",
-          i, feedback.sequence.back());
+        RCLCPP_INFO(logger, "Feedback: sequence[%d] = %d", i, feedback.sequence.back());
         co_await ctx.sleep(500ms);
       }
 
@@ -89,9 +83,7 @@ int main(int argc, char * argv[])
       co_await timer->next();
       auto msg = std_msgs::msg::String();
       msg.data = "Hello from A: " + std::to_string(count++);
-      RCLCPP_INFO(
-        n->get_logger(), "Publishing to topic_a: '%s'",
-        msg.data.c_str());
+      RCLCPP_INFO(n->get_logger(), "Publishing to topic_a: '%s'", msg.data.c_str());
       pub->publish(msg);
     }
   });
@@ -106,9 +98,7 @@ int main(int argc, char * argv[])
       co_await timer->next();
       auto msg = std_msgs::msg::String();
       msg.data = "Hello from B: " + std::to_string(count++);
-      RCLCPP_INFO(
-        n->get_logger(), "Publishing to topic_b: '%s'",
-        msg.data.c_str());
+      RCLCPP_INFO(n->get_logger(), "Publishing to topic_b: '%s'", msg.data.c_str());
       pub->publish(msg);
     }
   });

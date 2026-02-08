@@ -32,6 +32,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_event_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
   }
 
   void TearDown() override
@@ -44,13 +45,14 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
 };
 
 TEST_F(EventTest, AlreadySet)
@@ -83,7 +85,7 @@ TEST_F(EventTest, WaitThenSet)
 
   // Spin a bit — task should be suspended
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
   EXPECT_FALSE(reached);
@@ -111,7 +113,7 @@ TEST_F(EventTest, MultipleWaiters)
   auto task3 = ctx_->create_task(make_waiter());
 
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
   EXPECT_EQ(count, 0);
@@ -146,7 +148,7 @@ TEST_F(EventTest, ClearAndReuse)
   event.clear();
   auto task2 = ctx_->create_task(coro());
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
   EXPECT_EQ(count, 1);  // still waiting
@@ -171,7 +173,7 @@ TEST_F(EventTest, CancelDuringWait)
 
   // Spin a bit — task should be suspended
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 
@@ -199,7 +201,7 @@ TEST_F(EventTest, CancelDoesNotDoubleResume)
 
   // Spin a bit — task should be suspended
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 
@@ -214,7 +216,7 @@ TEST_F(EventTest, CancelDoesNotDoubleResume)
 
   // Spin a bit more to verify no crash
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
   EXPECT_TRUE(reached_end);

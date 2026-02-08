@@ -34,6 +34,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_topic_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     pub_ = node_->create_publisher<StringMsg>("test_topic", 10);
   }
 
@@ -48,7 +49,7 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
@@ -62,6 +63,7 @@ protected:
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp::Publisher<StringMsg>::SharedPtr pub_;
 };
 
@@ -82,7 +84,7 @@ TEST_F(TopicStreamTest, SubscribeAndReceiveMessage)
 
   // Let subscription establish
   for (int i = 0; i < 30; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
   }
 
@@ -111,7 +113,7 @@ TEST_F(TopicStreamTest, ReceiveMultipleMessages)
   auto task = ctx_->create_task(coro());
 
   for (int i = 0; i < 30; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
   }
 
@@ -160,7 +162,7 @@ TEST_F(TopicStreamTest, CancelDuringNext)
 
   // Let subscription establish and coroutine suspend
   for (int i = 0; i < 30; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
   }
 
