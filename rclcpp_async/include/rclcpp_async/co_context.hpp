@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <rclcpp/version.h>
+
 #include <chrono>
 #include <coroutine>
 #include <functional>
@@ -25,6 +27,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "rclcpp_async/cancellation_token.hpp"
 #include "rclcpp_async/channel.hpp"
@@ -78,6 +81,16 @@ public:
   }
 
   std::shared_ptr<void> take_data() override { return nullptr; }
+
+  std::shared_ptr<void> take_data_by_entity_id(size_t) override { return nullptr; }
+
+  void set_on_ready_callback(std::function<void(size_t, int)>) override {}
+
+  void clear_on_ready_callback() override {}
+
+#if RCLCPP_VERSION_GTE(30, 0, 0)
+  std::vector<std::shared_ptr<rclcpp::TimerBase>> get_timers() const override { return {}; }
+#endif
 
   void execute(const std::shared_ptr<void> &) override
   {
@@ -144,8 +157,8 @@ public:
     typename rclcpp::Client<ServiceT>::SharedPtr client,
     typename ServiceT::Request::SharedPtr request)
   {
-    return SendRequestAwaiter<ServiceT>{
-      *this, std::move(client), std::move(request), nullptr, {}, false};
+    return SendRequestAwaiter<ServiceT>{*this, std::move(client), std::move(request), nullptr, {},
+                                        false};
   }
 
   SleepAwaiter sleep(std::chrono::nanoseconds duration)
@@ -184,8 +197,8 @@ public:
   SendGoalAwaiter<ActionT> send_goal(
     typename rclcpp_action::Client<ActionT>::SharedPtr client, typename ActionT::Goal goal)
   {
-    return SendGoalAwaiter<ActionT>{*this,   std::move(client), std::move(goal),
-                                    nullptr, nullptr,           {},              false};
+    return SendGoalAwaiter<ActionT>{*this, std::move(client), std::move(goal), nullptr, nullptr, {},
+                                    false};
   }
 
   template <typename ServiceT, typename CallbackT>

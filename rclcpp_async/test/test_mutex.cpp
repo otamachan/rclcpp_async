@@ -34,6 +34,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_mutex_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
   }
 
   void TearDown() override
@@ -46,7 +47,7 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + duration;
     while (std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
@@ -55,13 +56,14 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
 };
 
 TEST_F(MutexTest, UncontestedLockUnlock)
@@ -181,7 +183,7 @@ TEST_F(MutexTest, CancelDuringLockWait)
 
   // Let B start waiting on the mutex
   for (int i = 0; i < 30; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 
@@ -245,14 +247,14 @@ TEST_F(MutexTest, CancelDoesNotTransferLock)
 
   // Wait until B is confirmed to be waiting on the lock
   for (int i = 0; i < 100 && !b_waiting; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
   ASSERT_TRUE(b_waiting);
 
   // Give B one more spin to ensure it's in the wait queue
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 

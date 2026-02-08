@@ -34,6 +34,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_create_service_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     client_ = node_->create_client<SetBool>("test_coro_service");
   }
 
@@ -49,13 +50,14 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp::Client<SetBool>::SharedPtr client_;
   rclcpp::Service<SetBool>::SharedPtr service_;
 };
@@ -71,7 +73,7 @@ TEST_F(CreateServiceTest, BasicCoroutineCallback)
     });
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (client_->service_is_ready()) {
       break;
@@ -106,7 +108,7 @@ TEST_F(CreateServiceTest, CoroutineCallbackWithAwait)
     });
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (client_->service_is_ready()) {
       break;

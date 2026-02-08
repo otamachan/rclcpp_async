@@ -33,6 +33,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_channel_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
   }
 
   void TearDown() override
@@ -45,13 +46,14 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
 };
 
 TEST_F(ChannelTest, SendThenNext)
@@ -88,7 +90,7 @@ TEST_F(ChannelTest, NextThenSend)
 
   // Spin a bit — task should be suspended
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
   EXPECT_EQ(received, 0);
@@ -221,7 +223,7 @@ TEST_F(ChannelTest, CancelDuringNext)
 
   // Spin a bit — task should be suspended
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 
@@ -247,7 +249,7 @@ TEST_F(ChannelTest, CancelFromThread)
 
   // Spin a bit — task should be suspended
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 

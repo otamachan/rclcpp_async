@@ -35,6 +35,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_wfa_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     action_client_ = rclcpp_action::create_client<Fibonacci>(node_, "test_wfa_action");
   }
 
@@ -50,7 +51,7 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
@@ -73,6 +74,7 @@ protected:
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp_action::Client<Fibonacci>::SharedPtr action_client_;
   rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
 };
@@ -81,7 +83,7 @@ TEST_F(WaitForActionTest, ServerAlreadyReady)
 {
   create_action_server();
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -104,7 +106,7 @@ TEST_F(WaitForActionTest, ServerBecomesReady)
   auto task = ctx_->create_task(coro());
 
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
   }
   create_action_server();
@@ -133,9 +135,9 @@ TEST_F(WaitForActionTest, Cancel)
   auto coro = [&]() -> Task<void> { result = co_await ctx_->wait_for_action(action_client_, 10s); };
   auto task = ctx_->create_task(coro());
 
-  rclcpp::spin_some(node_);
+  executor_.spin_some();
   std::this_thread::sleep_for(10ms);
-  rclcpp::spin_some(node_);
+  executor_.spin_some();
 
   task.cancel();
   spin_until_done(task);

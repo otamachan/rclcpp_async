@@ -34,6 +34,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_sendreq_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     client_ = node_->create_client<SetBool>("test_sendreq_service");
     service_ = node_->create_service<SetBool>(
       "test_sendreq_service",
@@ -55,13 +56,14 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp::Client<SetBool>::SharedPtr client_;
   rclcpp::Service<SetBool>::SharedPtr service_;
 };
@@ -70,7 +72,7 @@ TEST_F(SendRequestTest, SendAndReceive)
 {
   // Wait for service discovery
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (client_->service_is_ready()) {
       break;
@@ -96,7 +98,7 @@ TEST_F(SendRequestTest, SendAndReceive)
 TEST_F(SendRequestTest, SendFalseValue)
 {
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (client_->service_is_ready()) {
       break;
@@ -122,7 +124,7 @@ TEST_F(SendRequestTest, SendFalseValue)
 TEST_F(SendRequestTest, AlreadyCancelledIsImmediate)
 {
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (client_->service_is_ready()) {
       break;
@@ -163,7 +165,7 @@ TEST_F(SendRequestTest, CancelDuringSendRequest)
 
   // Let the coroutine suspend on send_request
   for (int i = 0; i < 10; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(1ms);
   }
 

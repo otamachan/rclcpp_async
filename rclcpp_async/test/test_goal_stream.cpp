@@ -37,6 +37,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_goal_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
     action_client_ = rclcpp_action::create_client<Fibonacci>(node_, "test_goal_action");
   }
 
@@ -52,7 +53,7 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
@@ -111,6 +112,7 @@ protected:
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp_action::Client<Fibonacci>::SharedPtr action_client_;
   rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
 };
@@ -120,7 +122,7 @@ TEST_F(GoalStreamTest, SendGoalAndReceiveResult)
   create_accepting_server();
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -167,7 +169,7 @@ TEST_F(GoalStreamTest, GoalRejected)
   create_rejecting_server();
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -200,7 +202,7 @@ TEST_F(GoalStreamTest, CancelGoal)
   create_accepting_server(20, 300);
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -251,7 +253,7 @@ TEST_F(GoalStreamTest, AlreadyCancelledIsImmediate)
   create_accepting_server();
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -281,7 +283,7 @@ TEST_F(GoalStreamTest, CancelDuringSendGoal)
   create_accepting_server();
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -319,7 +321,7 @@ TEST_F(GoalStreamTest, CancelDuringFeedback)
   create_accepting_server(20, 300);
 
   for (int i = 0; i < 50; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (action_client_->action_server_is_ready()) {
       break;
@@ -357,7 +359,7 @@ TEST_F(GoalStreamTest, CancelDuringFeedback)
 
   // Wait for server to start sending feedback, then cancel
   for (int i = 0; i < 100; i++) {
-    rclcpp::spin_some(node_);
+    executor_.spin_some();
     std::this_thread::sleep_for(10ms);
     if (feedback_count >= 1) {
       break;

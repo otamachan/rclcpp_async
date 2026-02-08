@@ -32,6 +32,7 @@ protected:
   {
     node_ = std::make_shared<rclcpp::Node>("test_sleep_node");
     ctx_ = std::make_unique<CoContext>(node_);
+    executor_.add_node(node_);
   }
 
   void TearDown() override
@@ -44,13 +45,14 @@ protected:
   {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
-      rclcpp::spin_some(node_);
+      executor_.spin_some();
       std::this_thread::sleep_for(1ms);
     }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<CoContext> ctx_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
 };
 
 TEST_F(SleepTest, SleepCompletesWithOk)
@@ -88,9 +90,9 @@ TEST_F(SleepTest, CancelDuringSleep)
   auto task = ctx_->create_task(coro());
 
   // Let it start sleeping
-  rclcpp::spin_some(node_);
+  executor_.spin_some();
   std::this_thread::sleep_for(10ms);
-  rclcpp::spin_some(node_);
+  executor_.spin_some();
 
   task.cancel();
   spin_until_done(task);
