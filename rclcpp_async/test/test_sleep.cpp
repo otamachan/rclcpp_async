@@ -113,3 +113,66 @@ TEST_F(SleepTest, AlreadyCancelledIsImmediate)
   ASSERT_TRUE(running.handle.done());
   EXPECT_TRUE(result.cancelled());
 }
+
+// co_await a create_task'd Task (like Python's await asyncio.create_task())
+TEST_F(SleepTest, AwaitCreateTaskValue)
+{
+  int result = 0;
+
+  auto background = [&]() -> Task<int> {
+    co_await ctx_->sleep(50ms);
+    co_return 42;
+  };
+
+  auto coro = [&]() -> Task<void> {
+    auto bg = ctx_->create_task(background());
+    result = co_await bg;
+  };
+
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(result, 42);
+}
+
+TEST_F(SleepTest, AwaitCreateTaskVoid)
+{
+  bool done = false;
+
+  auto background = [&]() -> Task<void> {
+    co_await ctx_->sleep(50ms);
+    done = true;
+  };
+
+  auto coro = [&]() -> Task<void> {
+    auto bg = ctx_->create_task(background());
+    co_await bg;
+  };
+
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(done);
+}
+
+TEST_F(SleepTest, AwaitCreateTaskAlreadyDone)
+{
+  int result = 0;
+
+  // Task that completes synchronously (no async suspension)
+  auto background = [&]() -> Task<int> { co_return 99; };
+
+  auto coro = [&]() -> Task<void> {
+    auto bg = ctx_->create_task(background());
+    // bg is already done by the time we co_await it
+    result = co_await bg;
+  };
+
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(result, 99);
+}

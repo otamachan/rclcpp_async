@@ -119,6 +119,7 @@ public:
   template <typename T>
   [[nodiscard]] Task<T> create_task(Task<T> task)
   {
+    task.started_ = true;
     task.handle.resume();
     return task;
   }

@@ -77,12 +77,17 @@ struct Task
   };
 
   std::coroutine_handle<promise_type> handle;
+  bool started_ = false;
 
   // co_await Task (coroutine chaining)
   bool await_ready() { return handle.done(); }
   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
   {
     handle.promise().continuation = h;
+    if (started_) {
+      return std::noop_coroutine();
+    }
+    started_ = true;
     return handle;
   }
   T await_resume() { return std::move(*handle.promise().value); }
@@ -95,7 +100,7 @@ struct Task
       handle.destroy();
     }
   }
-  Task(Task && o) noexcept : handle(o.handle) { o.handle = nullptr; }
+  Task(Task && o) noexcept : handle(o.handle), started_(o.started_) { o.handle = nullptr; }
   Task & operator=(Task &&) = delete;
   Task(const Task &) = delete;
 
@@ -153,11 +158,16 @@ struct Task<void>
   };
 
   std::coroutine_handle<promise_type> handle;
+  bool started_ = false;
 
   bool await_ready() { return handle.done(); }
   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
   {
     handle.promise().continuation = h;
+    if (started_) {
+      return std::noop_coroutine();
+    }
+    started_ = true;
     return handle;
   }
   void await_resume() {}
@@ -170,7 +180,7 @@ struct Task<void>
       handle.destroy();
     }
   }
-  Task(Task && o) noexcept : handle(o.handle) { o.handle = nullptr; }
+  Task(Task && o) noexcept : handle(o.handle), started_(o.started_) { o.handle = nullptr; }
   Task & operator=(Task &&) = delete;
   Task(const Task &) = delete;
 

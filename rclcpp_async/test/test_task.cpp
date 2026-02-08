@@ -157,3 +157,79 @@ TEST(TaskT, AwaitTransformSetsCancellationToken)
   EXPECT_TRUE(task.handle.done());
   EXPECT_EQ(*task.handle.promise().value, 99);
 }
+
+// ============================================================
+// co_await started task (like Python's await create_task())
+// ============================================================
+
+Task<int> await_started_value()
+{
+  auto bg = returns_42();
+  bg.started_ = true;
+  bg.handle.resume();  // simulate create_task
+  int val = co_await std::move(bg);
+  co_return val + 1;
+}
+
+TEST(TaskT, AwaitStartedTask)
+{
+  auto task = await_started_value();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(*task.handle.promise().value, 43);
+}
+
+Task<void> await_started_void()
+{
+  auto bg = does_nothing();
+  bg.started_ = true;
+  bg.handle.resume();
+  co_await std::move(bg);
+}
+
+TEST(TaskVoid, AwaitStartedTask)
+{
+  auto task = await_started_void();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+}
+
+// Await a started task that hasn't completed yet (suspended mid-execution)
+Task<int> slow_task()
+{
+  int a = co_await inner_task();  // suspends then resumes
+  co_return a + 100;
+}
+
+Task<int> await_started_slow()
+{
+  auto bg = slow_task();
+  bg.started_ = true;
+  bg.handle.resume();
+  // bg is now done (synchronous chain), co_await should return immediately
+  int val = co_await std::move(bg);
+  co_return val;
+}
+
+TEST(TaskT, AwaitStartedSlowTask)
+{
+  auto task = await_started_slow();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(*task.handle.promise().value, 110);
+}
+
+// Lazy co_await still works (backwards compatibility)
+Task<int> await_lazy()
+{
+  int val = co_await returns_42();
+  co_return val + 1;
+}
+
+TEST(TaskT, AwaitLazyStillWorks)
+{
+  auto task = await_lazy();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(*task.handle.promise().value, 43);
+}
