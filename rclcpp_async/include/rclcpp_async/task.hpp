@@ -1,0 +1,214 @@
+// Copyright 2025 Tamaki Nishino
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <coroutine>
+#include <optional>
+#include <utility>
+
+#include "rclcpp_async/cancellation_token.hpp"
+
+namespace rclcpp_async
+{
+
+template <typename T>
+concept Cancellable =
+  requires(T t, CancellationToken * token) { t.set_token(token); };  // NOLINT(readability/braces)
+
+template <typename T = void>
+struct Task
+{
+  struct promise_type
+  {
+    std::optional<T> value;
+    std::coroutine_handle<> continuation;
+    CancellationToken token;
+
+    Task get_return_object()
+    {
+      return Task{std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+
+    std::suspend_always initial_suspend() { return {}; }
+
+    struct FinalAwaiter
+    {
+      bool await_ready() noexcept { return false; }
+      std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
+      {
+        if (h.promise().continuation) {
+          return h.promise().continuation;
+        }
+        return std::noop_coroutine();
+      }
+      void await_resume() noexcept {}
+    };
+
+    FinalAwaiter final_suspend() noexcept { return {}; }
+
+    template <Cancellable A>
+    A && await_transform(A && awaiter)
+    {
+      awaiter.set_token(&token);
+      return std::forward<A>(awaiter);
+    }
+
+    template <typename A>
+      requires(!Cancellable<A>)
+    A && await_transform(A && awaiter)
+    {
+      return std::forward<A>(awaiter);
+    }
+
+    void return_value(T v) { value = std::move(v); }
+    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+  };
+
+  std::coroutine_handle<promise_type> handle;
+
+  // co_await Task (coroutine chaining)
+  bool await_ready() { return handle.done(); }
+  std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
+  {
+    handle.promise().continuation = h;
+    return handle;
+  }
+  T await_resume() { return std::move(*handle.promise().value); }
+
+  void cancel() { handle.promise().token.cancel(); }
+
+  ~Task()
+  {
+    if (handle) {
+      handle.destroy();
+    }
+  }
+  Task(Task && o) noexcept : handle(o.handle) { o.handle = nullptr; }
+  Task & operator=(Task &&) = delete;
+  Task(const Task &) = delete;
+
+private:
+  explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}
+};
+
+// void specialization
+template <>
+struct Task<void>
+{
+  struct promise_type
+  {
+    std::coroutine_handle<> continuation;
+    CancellationToken token;
+
+    Task get_return_object()
+    {
+      return Task{std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+
+    std::suspend_always initial_suspend() { return {}; }
+
+    struct FinalAwaiter
+    {
+      bool await_ready() noexcept { return false; }
+      std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
+      {
+        if (h.promise().continuation) {
+          return h.promise().continuation;
+        }
+        return std::noop_coroutine();
+      }
+      void await_resume() noexcept {}
+    };
+
+    FinalAwaiter final_suspend() noexcept { return {}; }
+
+    template <Cancellable A>
+    A && await_transform(A && awaiter)
+    {
+      awaiter.set_token(&token);
+      return std::forward<A>(awaiter);
+    }
+
+    template <typename A>
+      requires(!Cancellable<A>)
+    A && await_transform(A && awaiter)
+    {
+      return std::forward<A>(awaiter);
+    }
+
+    void return_void() {}
+    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+  };
+
+  std::coroutine_handle<promise_type> handle;
+
+  bool await_ready() { return handle.done(); }
+  std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
+  {
+    handle.promise().continuation = h;
+    return handle;
+  }
+  void await_resume() {}
+
+  void cancel() { handle.promise().token.cancel(); }
+
+  ~Task()
+  {
+    if (handle) {
+      handle.destroy();
+    }
+  }
+  Task(Task && o) noexcept : handle(o.handle) { o.handle = nullptr; }
+  Task & operator=(Task &&) = delete;
+  Task(const Task &) = delete;
+
+private:
+  explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}
+};
+
+// Fire-and-forget coroutine that starts immediately and self-destructs on
+// completion. Used internally for service server callbacks where co_await is
+// needed.
+struct SpawnedTask
+{
+  struct promise_type
+  {
+    CancellationToken token;
+
+    SpawnedTask get_return_object() { return {}; }
+
+    std::suspend_never initial_suspend() { return {}; }
+    std::suspend_never final_suspend() noexcept { return {}; }
+
+    template <Cancellable A>
+    A && await_transform(A && awaiter)
+    {
+      awaiter.set_token(&token);
+      return std::forward<A>(awaiter);
+    }
+
+    template <typename A>
+      requires(!Cancellable<A>)
+    A && await_transform(A && awaiter)
+    {
+      return std::forward<A>(awaiter);
+    }
+
+    void return_void() {}
+    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+  };
+};
+
+}  // namespace rclcpp_async
