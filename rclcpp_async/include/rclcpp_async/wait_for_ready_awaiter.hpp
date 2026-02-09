@@ -56,10 +56,12 @@ struct WaitForReadyAwaiter
 
   void set_token(CancellationToken * t) { token = t; }
 
+  bool cancelled = false;
+
   bool await_ready()
   {
     if (token && token->is_cancelled()) {
-      result = Result<void>::Cancelled();
+      cancelled = true;
       return true;
     }
     if (checker.is_ready()) {
@@ -75,6 +77,9 @@ struct WaitForReadyAwaiter
   {
     poll_timer.reset();
     deadline_timer.reset();
+    if (cancelled) {
+      throw CancelledException{};
+    }
     return std::move(result);
   }
 };

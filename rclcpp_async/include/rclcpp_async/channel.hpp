@@ -21,7 +21,6 @@
 #include <utility>
 
 #include "rclcpp_async/cancellation_token.hpp"
-#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -63,18 +62,18 @@ public:
 
     bool await_suspend(std::coroutine_handle<> h);
 
-    Result<std::optional<T>> await_resume()
+    std::optional<T> await_resume()
     {
       if (cancelled) {
-        return Result<std::optional<T>>::Cancelled();
+        throw CancelledException{};
       }
       std::lock_guard lock(ch.mutex_);
       if (ch.queue_.empty()) {
-        return Result<std::optional<T>>::Ok(std::nullopt);
+        return std::nullopt;
       }
       auto val = std::move(ch.queue_.front());
       ch.queue_.pop();
-      return Result<std::optional<T>>::Ok(std::move(val));
+      return std::move(val);
     }
   };
 

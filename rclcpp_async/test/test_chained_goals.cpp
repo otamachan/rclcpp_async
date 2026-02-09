@@ -129,7 +129,7 @@ TEST_F(ChainedGoalsTest, TwoSequentialGoalsWithDrain)
       auto stream1 = *r1.value;
       while (true) {
         auto ev = co_await stream1->next();
-        if (!ev.ok() || !ev.value->has_value()) {
+        if (!ev.has_value()) {
           break;
         }
       }
@@ -144,7 +144,7 @@ TEST_F(ChainedGoalsTest, TwoSequentialGoalsWithDrain)
       auto stream2 = *r2.value;
       while (true) {
         auto ev = co_await stream2->next();
-        if (!ev.ok() || !ev.value->has_value()) {
+        if (!ev.has_value()) {
           break;
         }
       }

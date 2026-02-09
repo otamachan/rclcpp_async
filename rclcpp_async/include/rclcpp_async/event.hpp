@@ -19,7 +19,6 @@
 #include <queue>
 
 #include "rclcpp_async/cancellation_token.hpp"
-#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -65,12 +64,11 @@ public:
 
     void await_suspend(std::coroutine_handle<> h);
 
-    Result<void> await_resume()
+    void await_resume()
     {
       if (token && token->is_cancelled()) {
-        return Result<void>::Cancelled();
+        throw CancelledException{};
       }
-      return Result<void>::Ok();
     }
   };
 

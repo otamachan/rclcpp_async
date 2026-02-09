@@ -80,19 +80,19 @@ TEST_F(SendRequestTest, SendAndReceive)
   }
   ASSERT_TRUE(client_->service_is_ready());
 
-  Result<SetBool::Response::SharedPtr> result;
+  SetBool::Response::SharedPtr response;
   auto coro = [&]() -> Task<void> {
     auto req = std::make_shared<SetBool::Request>();
     req->data = true;
-    result = co_await ctx_->send_request<SetBool>(client_, req);
+    response = co_await ctx_->send_request<SetBool>(client_, req);
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  ASSERT_TRUE(result.ok());
-  EXPECT_TRUE(result.value.value()->success);
-  EXPECT_EQ(result.value.value()->message, "enabled");
+  ASSERT_TRUE(response);
+  EXPECT_TRUE(response->success);
+  EXPECT_EQ(response->message, "enabled");
 }
 
 TEST_F(SendRequestTest, SendFalseValue)
@@ -106,19 +106,19 @@ TEST_F(SendRequestTest, SendFalseValue)
   }
   ASSERT_TRUE(client_->service_is_ready());
 
-  Result<SetBool::Response::SharedPtr> result;
+  SetBool::Response::SharedPtr response;
   auto coro = [&]() -> Task<void> {
     auto req = std::make_shared<SetBool::Request>();
     req->data = false;
-    result = co_await ctx_->send_request<SetBool>(client_, req);
+    response = co_await ctx_->send_request<SetBool>(client_, req);
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value.value()->success);
-  EXPECT_EQ(result.value.value()->message, "disabled");
+  ASSERT_TRUE(response);
+  EXPECT_FALSE(response->success);
+  EXPECT_EQ(response->message, "disabled");
 }
 
 TEST_F(SendRequestTest, AlreadyCancelledIsImmediate)
@@ -131,11 +131,15 @@ TEST_F(SendRequestTest, AlreadyCancelledIsImmediate)
     }
   }
 
-  Result<SetBool::Response::SharedPtr> result;
+  bool was_cancelled = false;
   auto coro = [&]() -> Task<void> {
-    auto req = std::make_shared<SetBool::Request>();
-    req->data = true;
-    result = co_await ctx_->send_request<SetBool>(client_, req);
+    try {
+      auto req = std::make_shared<SetBool::Request>();
+      req->data = true;
+      co_await ctx_->send_request<SetBool>(client_, req);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
   auto task = coro();
   task.cancel();
@@ -143,7 +147,7 @@ TEST_F(SendRequestTest, AlreadyCancelledIsImmediate)
   spin_until_done(running);
 
   ASSERT_TRUE(running.handle.done());
-  EXPECT_TRUE(result.cancelled());
+  EXPECT_TRUE(was_cancelled);
 }
 
 TEST_F(SendRequestTest, CancelDuringSendRequest)
@@ -153,11 +157,15 @@ TEST_F(SendRequestTest, CancelDuringSendRequest)
   // Create a client for a non-existent service to ensure the request stays pending.
   auto orphan_client = node_->create_client<SetBool>("nonexistent_service");
 
-  Result<SetBool::Response::SharedPtr> result;
+  bool was_cancelled = false;
   auto coro = [&]() -> Task<void> {
-    auto req = std::make_shared<SetBool::Request>();
-    req->data = true;
-    result = co_await ctx_->send_request<SetBool>(orphan_client, req);
+    try {
+      auto req = std::make_shared<SetBool::Request>();
+      req->data = true;
+      co_await ctx_->send_request<SetBool>(orphan_client, req);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
 
   auto task = coro();
@@ -173,5 +181,5 @@ TEST_F(SendRequestTest, CancelDuringSendRequest)
   spin_until_done(running);
 
   ASSERT_TRUE(running.handle.done());
-  EXPECT_TRUE(result.cancelled());
+  EXPECT_TRUE(was_cancelled);
 }

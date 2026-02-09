@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -23,6 +24,11 @@
 
 namespace rclcpp_async
 {
+
+struct CancelledException : std::exception
+{
+  const char * what() const noexcept override { return "coroutine cancelled"; }
+};
 
 class CancellationToken
 {

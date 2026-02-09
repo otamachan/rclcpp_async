@@ -72,19 +72,12 @@ int main(int argc, char * argv[])
       auto inner_req = std::make_shared<SetBool::Request>();
       inner_req->data = req->data;
       RCLCPP_INFO(logger, "[validate] calling slow_square...");
-      auto result = co_await ctx.send_request<SetBool>(slow_square_client, inner_req);
+      auto inner_resp = co_await ctx.send_request<SetBool>(slow_square_client, inner_req);
 
       SetBool::Response resp;
-      if (result.ok()) {
-        auto inner_resp = result.value.value();
-        resp.success = inner_resp->success;
-        resp.message = "validate ok (inner: " + inner_resp->message + ")";
-        RCLCPP_INFO(logger, "[validate] slow_square returned: %s", inner_resp->message.c_str());
-      } else {
-        resp.success = false;
-        resp.message = "validate failed: slow_square error";
-        RCLCPP_ERROR(logger, "[validate] slow_square call failed");
-      }
+      resp.success = inner_resp->success;
+      resp.message = "validate ok (inner: " + inner_resp->message + ")";
+      RCLCPP_INFO(logger, "[validate] slow_square returned: %s", inner_resp->message.c_str());
       co_return resp;
     });
   RCLCPP_INFO(node->get_logger(), "Service 'validate' ready");
@@ -103,13 +96,8 @@ int main(int argc, char * argv[])
       auto req = std::make_shared<SetBool::Request>();
       req->data = true;
       RCLCPP_INFO(logger, "[fibonacci] calling validate...");
-      auto val_result = co_await ctx.send_request<SetBool>(validate_client, req);
-      if (val_result.ok()) {
-        auto resp = val_result.value.value();
-        RCLCPP_INFO(logger, "[fibonacci] validate returned: %s", resp->message.c_str());
-      } else {
-        RCLCPP_ERROR(logger, "[fibonacci] validate call failed");
-      }
+      auto val_resp = co_await ctx.send_request<SetBool>(validate_client, req);
+      RCLCPP_INFO(logger, "[fibonacci] validate returned: %s", val_resp->message.c_str());
 
       // Compute fibonacci with feedback
       Fibonacci::Feedback feedback;
@@ -160,11 +148,11 @@ int main(int argc, char * argv[])
     RCLCPP_INFO(logger, "[client] goal accepted");
 
     while (true) {
-      auto r = co_await stream->next();
-      if (!r.ok() || !r.value->has_value()) {
+      auto feedback = co_await stream->next();
+      if (!feedback.has_value()) {
         break;
       }
-      auto & seq = (*r.value.value())->sequence;
+      auto & seq = (*feedback)->sequence;
       RCLCPP_INFO(logger, "[client] feedback: length=%zu, last=%d", seq.size(), seq.back());
     }
 

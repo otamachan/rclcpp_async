@@ -23,11 +23,11 @@ rclcpp_async::Task<void> listen(rclcpp_async::CoContext & ctx, std::string topic
   auto stream = ctx.subscribe<std_msgs::msg::String>(topic, 10);
 
   while (true) {
-    auto r = co_await stream->next();
-    if (!r.ok() || !r.value->has_value()) {
+    auto msg = co_await stream->next();
+    if (!msg.has_value()) {
       break;
     }
-    auto & data = (*r.value.value())->data;
+    auto & data = (*msg)->data;
     RCLCPP_INFO(ctx.node()->get_logger(), "[%s] %s", topic.c_str(), data.c_str());
   }
 }

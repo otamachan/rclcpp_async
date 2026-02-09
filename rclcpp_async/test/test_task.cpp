@@ -131,6 +131,55 @@ TEST(TaskT, MoveConstructor)
 }
 
 // ============================================================
+// Exception propagation
+// ============================================================
+
+Task<int> throws_runtime_error()
+{
+  throw std::runtime_error("test error");
+  co_return 0;
+}
+
+TEST(TaskT, ExceptionPropagation)
+{
+  auto inner = []() -> Task<int> { co_return co_await throws_runtime_error(); };
+
+  auto task = inner();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(task.handle.promise().exception != nullptr);
+}
+
+TEST(TaskT, ExceptionPropagationThroughChain)
+{
+  auto outer = []() -> Task<int> {
+    int val = co_await throws_runtime_error();
+    co_return val;
+  };
+
+  auto task = outer();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(task.handle.promise().exception != nullptr);
+}
+
+Task<void> throws_void()
+{
+  throw std::runtime_error("void error");
+  co_return;
+}
+
+TEST(TaskVoid, ExceptionPropagation)
+{
+  auto inner = []() -> Task<void> { co_await throws_void(); };
+
+  auto task = inner();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(task.handle.promise().exception != nullptr);
+}
+
+// ============================================================
 // await_transform with Cancellable concept
 // ============================================================
 

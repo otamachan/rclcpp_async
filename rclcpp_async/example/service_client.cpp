@@ -38,13 +38,10 @@ rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
     req->data = value;
 
     RCLCPP_INFO(ctx.node()->get_logger(), "Sending request: %s", value ? "true" : "false");
-    auto result = co_await ctx.send_request<SetBool>(client, req);
-    if (result.ok()) {
-      auto resp = result.value.value();
-      RCLCPP_INFO(
-        ctx.node()->get_logger(), "Response: success=%s, message='%s'",
-        resp->success ? "true" : "false", resp->message.c_str());
-    }
+    auto resp = co_await ctx.send_request<SetBool>(client, req);
+    RCLCPP_INFO(
+      ctx.node()->get_logger(), "Response: success=%s, message='%s'",
+      resp->success ? "true" : "false", resp->message.c_str());
 
     value = !value;
     co_await ctx.sleep(std::chrono::seconds(1));
