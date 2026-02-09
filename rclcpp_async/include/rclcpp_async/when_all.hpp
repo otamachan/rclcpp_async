@@ -18,18 +18,23 @@
 #include <atomic>
 #include <coroutine>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <stop_token>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
 
-#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/cancelled_exception.hpp"
 #include "rclcpp_async/task.hpp"
 
 namespace rclcpp_async
 {
+
+using StopCb = std::stop_callback<std::function<void()>>;
 
 // Map Task<void> -> std::monostate, Task<T> -> T
 template <typename T>
@@ -124,10 +129,11 @@ struct WhenAllAwaiter
   std::shared_ptr<WhenAllState> state;
   std::shared_ptr<ResultTuple> results;
   std::vector<JoinTask> joins;
-  std::array<CancellationToken *, N> child_tokens;
-  CancellationToken * token = nullptr;
+  std::array<std::stop_source *, N> child_sources;
+  std::stop_token token;
+  std::optional<StopCb> cancel_cb_;
 
-  void set_token(CancellationToken * t) { token = t; }
+  void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready() { return false; }
 
@@ -136,10 +142,10 @@ struct WhenAllAwaiter
     state->continuation = h;
 
     // Register cancellation propagation
-    if (token) {
-      token->on_cancel([this]() {
-        for (auto * ct : child_tokens) {
-          ct->cancel();
+    if (token.stop_possible()) {
+      cancel_cb_.emplace(token, [this]() {
+        for (auto * ss : child_sources) {
+          ss->request_stop();
         }
       });
     }
@@ -155,6 +161,7 @@ struct WhenAllAwaiter
 
   ResultTuple await_resume()
   {
+    cancel_cb_.reset();
     for (auto & jt : joins) {
       if (jt.handle.promise().exception) {
         std::rethrow_exception(jt.handle.promise().exception);
@@ -170,8 +177,8 @@ WhenAllAwaiter<Ts...> when_all(Task<Ts>... tasks)
 {
   constexpr std::size_t N = sizeof...(Ts);
 
-  // Extract child token pointers before moving tasks
-  std::array<CancellationToken *, N> child_tokens = {&tasks.handle.promise().token...};
+  // Extract child stop_source pointers before moving tasks
+  std::array<std::stop_source *, N> child_sources = {&tasks.handle.promise().stop_source...};
 
   auto state = std::make_shared<WhenAllState>(static_cast<int>(N + 1));
   auto results = std::make_shared<std::tuple<when_all_value_t<Ts>...>>();
@@ -190,7 +197,7 @@ WhenAllAwaiter<Ts...> when_all(Task<Ts>... tasks)
   }
 
   return WhenAllAwaiter<Ts...>{
-    std::move(state), std::move(results), std::move(joins), child_tokens, nullptr};
+    std::move(state), std::move(results), std::move(joins), child_sources, {}, {}};
 }
 
 }  // namespace rclcpp_async

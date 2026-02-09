@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
+#include <stop_token>
 #include <string>
 #include <tuple>
 #include <variant>
@@ -21,6 +23,8 @@
 #include "rclcpp_async/when_all.hpp"
 
 using namespace rclcpp_async;  // NOLINT(build/namespaces)
+
+using StopCb = std::stop_callback<std::function<void()>>;
 
 // ============================================================
 // Helper coroutines
@@ -126,10 +130,10 @@ Task<std::tuple<int, int>> cancel_propagation_coro(bool * child1_cancelled, bool
 
   auto t1 = child1();
   auto t2 = child2();
-  auto * tok1 = &t1.handle.promise().token;
-  auto * tok2 = &t2.handle.promise().token;
-  tok1->on_cancel([child1_cancelled]() { *child1_cancelled = true; });
-  tok2->on_cancel([child2_cancelled]() { *child2_cancelled = true; });
+  auto tok1 = t1.handle.promise().stop_source.get_token();
+  auto tok2 = t2.handle.promise().stop_source.get_token();
+  StopCb cb1(tok1, [child1_cancelled]() { *child1_cancelled = true; });
+  StopCb cb2(tok2, [child2_cancelled]() { *child2_cancelled = true; });
 
   co_return co_await when_all(std::move(t1), std::move(t2));
 }

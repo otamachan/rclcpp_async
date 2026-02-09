@@ -15,15 +15,21 @@
 #pragma once
 
 #include <coroutine>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <queue>
+#include <stop_token>
+#include <utility>
 
-#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/cancelled_exception.hpp"
 
 namespace rclcpp_async
 {
 
 class CoContext;
+
+using StopCb = std::stop_callback<std::function<void()>>;
 
 class Event
 {
@@ -49,14 +55,15 @@ public:
   struct WaitAwaiter
   {
     Event & event;
-    CancellationToken * token = nullptr;
+    std::stop_token token;
+    std::optional<StopCb> cancel_cb_;
     std::shared_ptr<bool> active;
 
-    void set_token(CancellationToken * t) { token = t; }
+    void set_token(std::stop_token t) { token = std::move(t); }
 
     bool await_ready()
     {
-      if (token && token->is_cancelled()) {
+      if (token.stop_requested()) {
         return true;
       }
       return event.set_;
@@ -66,13 +73,14 @@ public:
 
     void await_resume()
     {
-      if (token && token->is_cancelled()) {
+      cancel_cb_.reset();
+      if (token.stop_requested()) {
         throw CancelledException{};
       }
     }
   };
 
-  WaitAwaiter wait() { return WaitAwaiter{*this, nullptr, nullptr}; }
+  WaitAwaiter wait() { return WaitAwaiter{*this, {}, {}, nullptr}; }
 };
 
 }  // namespace rclcpp_async

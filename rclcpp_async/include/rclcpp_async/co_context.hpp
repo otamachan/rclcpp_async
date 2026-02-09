@@ -21,15 +21,17 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <rclcpp/detail/add_guard_condition_to_rcl_wait_set.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <stop_token>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/cancelled_exception.hpp"
 #include "rclcpp_async/channel.hpp"
 #include "rclcpp_async/event.hpp"
 #include "rclcpp_async/goal_context.hpp"
@@ -47,6 +49,8 @@ namespace rclcpp_async
 {
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces)
+
+using StopCb = std::stop_callback<std::function<void()>>;
 
 class DrainWaitable : public rclcpp::Waitable
 {
@@ -148,7 +152,7 @@ public:
     rclcpp::ClientBase::SharedPtr client, std::chrono::nanoseconds timeout = 5s)
   {
     return WaitForServiceAwaiter{
-      *this, ServiceReadyChecker{std::move(client)}, timeout, nullptr, nullptr, nullptr, {}, false};
+      *this, ServiceReadyChecker{std::move(client)}, timeout, nullptr, nullptr, {}, {}, {}, false};
   }
 
   template <typename ServiceT>
@@ -156,13 +160,13 @@ public:
     typename rclcpp::Client<ServiceT>::SharedPtr client,
     typename ServiceT::Request::SharedPtr request)
   {
-    return SendRequestAwaiter<ServiceT>{*this, std::move(client), std::move(request), nullptr, {},
-                                        false};
+    return SendRequestAwaiter<ServiceT>{
+      *this, std::move(client), std::move(request), {}, {}, {}, false, false};
   }
 
   SleepAwaiter sleep(std::chrono::nanoseconds duration)
   {
-    return SleepAwaiter{*this, duration, nullptr, nullptr, {}, false};
+    return SleepAwaiter{*this, duration, nullptr, {}, {}, false, false};
   }
 
   template <typename ActionT>
@@ -170,7 +174,7 @@ public:
     std::shared_ptr<rclcpp_action::Client<ActionT>> client, std::chrono::nanoseconds timeout = 5s)
   {
     return WaitForActionAwaiter<ActionT>{
-      *this, ActionReadyChecker<ActionT>{std::move(client)}, timeout, nullptr, nullptr, nullptr, {},
+      *this, ActionReadyChecker<ActionT>{std::move(client)}, timeout, nullptr, nullptr, {}, {}, {},
       false};
   }
 
@@ -197,8 +201,8 @@ public:
   SendGoalAwaiter<ActionT> send_goal(
     typename rclcpp_action::Client<ActionT>::SharedPtr client, typename ActionT::Goal goal)
   {
-    return SendGoalAwaiter<ActionT>{*this, std::move(client), std::move(goal), nullptr, nullptr, {},
-                                    false};
+    return SendGoalAwaiter<ActionT>{
+      *this, std::move(client), std::move(goal), nullptr, {}, {}, {}, false, false};
   }
 
   template <typename ServiceT, typename CallbackT>
@@ -288,13 +292,13 @@ public:
 
 template <typename DonePred, typename CancelAction>
 inline void register_cancel(
-  CancellationToken * token, CoContext & ctx, std::coroutine_handle<> h, DonePred is_done,
-  CancelAction action)
+  std::optional<StopCb> & out, std::stop_token token, CoContext & ctx, std::coroutine_handle<> h,
+  DonePred is_done, CancelAction action)
 {
-  if (!token) {
+  if (!token.stop_possible()) {
     return;
   }
-  token->on_cancel([&ctx, h, is_done, action]() {
+  out.emplace(token, [&ctx, h, is_done, action]() {
     ctx.post([&ctx, h, is_done, action]() {
       if (is_done()) {
         return;
@@ -333,7 +337,7 @@ void WaitForReadyAwaiter<ReadyChecker>::await_suspend(std::coroutine_handle<> h)
     ctx.node()->create_wall_timer(timeout, [finish]() { finish(Result<void>::Timeout()); });
 
   register_cancel(
-    token, ctx, h, [this]() { return done; },
+    cancel_cb_, token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
       poll_timer->cancel();
@@ -356,7 +360,7 @@ void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
     });
 
   register_cancel(
-    token, ctx, h, [this]() { return done; },
+    cancel_cb_, token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
       cancelled = true;
@@ -377,7 +381,7 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
   timer = ctx.node()->create_wall_timer(duration, [finish]() { finish(); });
 
   register_cancel(
-    token, ctx, h, [this]() { return done; },
+    cancel_cb_, token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
       timer->cancel();
@@ -390,7 +394,7 @@ void TopicStream<MsgT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   stream.waiter_ = h;
   register_cancel(
-    token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
+    cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
     [this]() {
       stream.waiter_ = nullptr;
       cancelled = true;
@@ -419,7 +423,7 @@ void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   stream.waiter_ = h;
   register_cancel(
-    token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
+    cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
     [this]() {
       stream.waiter_ = nullptr;
       cancelled = true;
@@ -480,7 +484,7 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
   client->async_send_goal(goal, options);
 
   register_cancel(
-    token, ctx, h, [this]() { return done; },
+    cancel_cb_, token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
       cancelled = true;
@@ -496,7 +500,7 @@ inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
   active = std::make_shared<bool>(true);
   event.waiters_.push({h, active});
   auto a = active;
-  register_cancel(token, event.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
+  register_cancel(cancel_cb_, token, event.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
 }
 
 inline void Event::set()
@@ -517,7 +521,7 @@ inline void Mutex::LockAwaiter::await_suspend(std::coroutine_handle<> h)
   active = std::make_shared<bool>(true);
   mutex.waiters_.push({h, active});
   auto a = active;
-  register_cancel(token, mutex.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
+  register_cancel(cancel_cb_, token, mutex.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
 }
 
 inline void Mutex::unlock()
@@ -542,7 +546,7 @@ inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   stream.waiter_ = h;
   register_cancel(
-    token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
+    cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
     [this]() {
       stream.waiter_ = nullptr;
       cancelled = true;
@@ -562,9 +566,9 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
       return false;  // don't suspend, data already available
     }
     ch.waiter_ = h;
-  }  // release ch.mutex_ before on_cancel to avoid deadlock
-  if (token) {
-    token->on_cancel([this, h]() {
+  }  // release ch.mutex_ before stop_callback to avoid deadlock
+  if (token.stop_possible()) {
+    cancel_cb_.emplace(token, [this, h]() {
       std::coroutine_handle<> w;
       {
         std::lock_guard lock(ch.mutex_);

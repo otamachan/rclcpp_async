@@ -14,15 +14,14 @@
 
 #pragma once
 
-#include "rclcpp_async/cancelled_exception.hpp"
-#include "rclcpp_async/channel.hpp"
-#include "rclcpp_async/co_context.hpp"
-#include "rclcpp_async/event.hpp"
-#include "rclcpp_async/goal_context.hpp"
-#include "rclcpp_async/goal_stream.hpp"
-#include "rclcpp_async/mutex.hpp"
-#include "rclcpp_async/result.hpp"
-#include "rclcpp_async/task.hpp"
-#include "rclcpp_async/timer_stream.hpp"
-#include "rclcpp_async/topic_stream.hpp"
-#include "rclcpp_async/when_all.hpp"
+#include <exception>
+
+namespace rclcpp_async
+{
+
+struct CancelledException : std::exception
+{
+  const char * what() const noexcept override { return "coroutine cancelled"; }
+};
+
+}  // namespace rclcpp_async
