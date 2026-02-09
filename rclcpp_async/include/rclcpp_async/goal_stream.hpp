@@ -107,10 +107,10 @@ public:
 
     void await_suspend(std::coroutine_handle<> h);
 
-    Result<std::optional<Feedback>> await_resume()
+    std::optional<Feedback> await_resume()
     {
       if (cancelled) {
-        return Result<std::optional<Feedback>>::Cancelled();
+        throw CancelledException{};
       }
       auto & event = stream.queue_.front();
       std::optional<Feedback> ret;
@@ -118,7 +118,7 @@ public:
         ret = std::move(event.feedback);
       }
       stream.queue_.pop();
-      return Result<std::optional<Feedback>>::Ok(std::move(ret));
+      return ret;
     }
   };
 
@@ -154,12 +154,14 @@ struct SendGoalAwaiter
   Result<std::shared_ptr<GoalStream<ActionT>>> result;
   bool done = false;
 
+  bool cancelled = false;
+
   void set_token(CancellationToken * t) { token = t; }
 
   bool await_ready()
   {
     if (token && token->is_cancelled()) {
-      result = Result<std::shared_ptr<GoalStream<ActionT>>>::Cancelled();
+      cancelled = true;
       return true;
     }
     return false;
@@ -167,7 +169,13 @@ struct SendGoalAwaiter
 
   void await_suspend(std::coroutine_handle<> h);
 
-  Result<std::shared_ptr<GoalStream<ActionT>>> await_resume() { return std::move(result); }
+  Result<std::shared_ptr<GoalStream<ActionT>>> await_resume()
+  {
+    if (cancelled) {
+      throw CancelledException{};
+    }
+    return std::move(result);
+  }
 };
 
 }  // namespace rclcpp_async

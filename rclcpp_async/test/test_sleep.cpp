@@ -57,35 +57,47 @@ protected:
 
 TEST_F(SleepTest, SleepCompletesWithOk)
 {
-  Result<void> result;
+  bool completed = false;
 
-  auto coro = [&]() -> Task<void> { result = co_await ctx_->sleep(50ms); };
+  auto coro = [&]() -> Task<void> {
+    co_await ctx_->sleep(50ms);
+    completed = true;
+  };
 
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  EXPECT_TRUE(result.ok());
+  EXPECT_TRUE(completed);
 }
 
 TEST_F(SleepTest, ZeroDurationIsImmediate)
 {
-  Result<void> result;
+  bool completed = false;
 
-  auto coro = [&]() -> Task<void> { result = co_await ctx_->sleep(0ms); };
+  auto coro = [&]() -> Task<void> {
+    co_await ctx_->sleep(0ms);
+    completed = true;
+  };
 
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  EXPECT_TRUE(result.ok());
+  EXPECT_TRUE(completed);
 }
 
 TEST_F(SleepTest, CancelDuringSleep)
 {
-  Result<void> result;
+  bool was_cancelled = false;
 
-  auto coro = [&]() -> Task<void> { result = co_await ctx_->sleep(10s); };
+  auto coro = [&]() -> Task<void> {
+    try {
+      co_await ctx_->sleep(10s);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
+  };
 
   auto task = ctx_->create_task(coro());
 
@@ -98,14 +110,20 @@ TEST_F(SleepTest, CancelDuringSleep)
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  EXPECT_TRUE(result.cancelled());
+  EXPECT_TRUE(was_cancelled);
 }
 
 TEST_F(SleepTest, AlreadyCancelledIsImmediate)
 {
-  Result<void> result;
+  bool was_cancelled = false;
 
-  auto coro = [&]() -> Task<void> { result = co_await ctx_->sleep(10s); };
+  auto coro = [&]() -> Task<void> {
+    try {
+      co_await ctx_->sleep(10s);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
+  };
 
   auto task = coro();
   task.cancel();  // Cancel before starting
@@ -113,7 +131,7 @@ TEST_F(SleepTest, AlreadyCancelledIsImmediate)
   spin_until_done(running);
 
   ASSERT_TRUE(running.handle.done());
-  EXPECT_TRUE(result.cancelled());
+  EXPECT_TRUE(was_cancelled);
 }
 
 // co_await a create_task'd Task (like Python's await asyncio.create_task())

@@ -28,7 +28,6 @@ struct Result
   {
     kOk,
     kTimeout,
-    kCancelled,
     kError
   };
 
@@ -38,11 +37,9 @@ struct Result
 
   bool ok() const { return status == Status::kOk; }
   bool timeout() const { return status == Status::kTimeout; }
-  bool cancelled() const { return status == Status::kCancelled; }
 
   static Result Ok(T v) { return {Status::kOk, std::move(v), {}}; }
   static Result Timeout() { return {Status::kTimeout, std::nullopt, {}}; }
-  static Result Cancelled() { return {Status::kCancelled, std::nullopt, {}}; }
   static Result Error(std::string msg) { return {Status::kError, std::nullopt, std::move(msg)}; }
 };
 
@@ -53,7 +50,6 @@ struct Result<void>
   {
     kOk,
     kTimeout,
-    kCancelled,
     kError
   };
 
@@ -62,11 +58,9 @@ struct Result<void>
 
   bool ok() const { return status == Status::kOk; }
   bool timeout() const { return status == Status::kTimeout; }
-  bool cancelled() const { return status == Status::kCancelled; }
 
   static Result Ok() { return {Status::kOk, {}}; }
   static Result Timeout() { return {Status::kTimeout, {}}; }
-  static Result Cancelled() { return {Status::kCancelled, {}}; }
   static Result Error(std::string msg) { return {Status::kError, std::move(msg)}; }
 };
 

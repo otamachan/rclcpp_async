@@ -73,10 +73,9 @@ TEST_F(TopicStreamTest, SubscribeAndReceiveMessage)
 
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
-    auto r = co_await stream->next();
-    EXPECT_TRUE(r.ok());
-    if (r.ok() && r.value->has_value()) {
-      received = (*r.value.value())->data;
+    auto msg = co_await stream->next();
+    if (msg.has_value()) {
+      received = (*msg)->data;
     }
   };
 
@@ -102,10 +101,9 @@ TEST_F(TopicStreamTest, ReceiveMultipleMessages)
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
     for (int i = 0; i < 3; i++) {
-      auto r = co_await stream->next();
-      EXPECT_TRUE(r.ok());
-      if (r.ok() && r.value->has_value()) {
-        received.push_back((*r.value.value())->data);
+      auto msg = co_await stream->next();
+      if (msg.has_value()) {
+        received.push_back((*msg)->data);
       }
     }
   };
@@ -136,8 +134,8 @@ TEST_F(TopicStreamTest, CloseReturnsNullopt)
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
     stream->close();
-    auto r = co_await stream->next();
-    got_nullopt = r.ok() && !r.value->has_value();
+    auto msg = co_await stream->next();
+    got_nullopt = !msg.has_value();
   };
 
   auto task = ctx_->create_task(coro());
@@ -153,8 +151,11 @@ TEST_F(TopicStreamTest, CancelDuringNext)
 
   auto coro = [&]() -> Task<void> {
     auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
-    auto r = co_await stream->next();
-    was_cancelled = r.cancelled();
+    try {
+      co_await stream->next();
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
 
   auto task = coro();

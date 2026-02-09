@@ -86,12 +86,11 @@ Task<void> listen(CoContext & ctx, std::string topic)
   auto stream = ctx.subscribe<std_msgs::msg::String>(topic, 10);
 
   while (true) {
-    auto r = co_await stream->next();
-    if (!r.ok() || !r.value->has_value()) {
+    auto msg = co_await stream->next();
+    if (!msg.has_value()) {
       break;
     }
-    auto & msg = *r.value.value();
-    RCLCPP_INFO(ctx.node()->get_logger(), "Heard: %s", msg->data.c_str());
+    RCLCPP_INFO(ctx.node()->get_logger(), "Heard: %s", (*msg)->data.c_str());
   }
 }
 ```
@@ -127,11 +126,8 @@ Task<void> call_service(CoContext & ctx)
   auto req = std::make_shared<SetBool::Request>();
   req->data = true;
 
-  auto result = co_await ctx.send_request<SetBool>(client, req);
-  if (result.ok()) {
-    auto resp = result.value.value();
-    RCLCPP_INFO(ctx.node()->get_logger(), "Response: %s", resp->message.c_str());
-  }
+  auto resp = co_await ctx.send_request<SetBool>(client, req);
+  RCLCPP_INFO(ctx.node()->get_logger(), "Response: %s", resp->message.c_str());
 }
 ```
 
@@ -233,11 +229,11 @@ Task<void> send_action(CoContext & ctx)
 
   // Iterate over feedback
   while (true) {
-    auto r = co_await stream->next();
-    if (!r.ok() || !r.value->has_value()) {
+    auto feedback = co_await stream->next();
+    if (!feedback.has_value()) {
       break;
     }
-    auto & seq = (*r.value.value())->sequence;
+    auto & seq = (*feedback)->sequence;
     RCLCPP_INFO(ctx.node()->get_logger(), "Feedback: last=%d", seq.back());
   }
 
@@ -257,10 +253,8 @@ rclcpp_async::Event event(ctx);
 
 // Task 1: wait for the event
 auto waiter = ctx.create_task([&]() -> Task<void> {
-  auto r = co_await event.wait();
-  if (r.ok()) {
-    RCLCPP_INFO(ctx.node()->get_logger(), "Event received!");
-  }
+  co_await event.wait();
+  RCLCPP_INFO(ctx.node()->get_logger(), "Event received!");
 });
 
 // Task 2: signal the event
@@ -286,12 +280,10 @@ rclcpp_async::Mutex mutex(ctx);
 
 Task<void> critical_section(CoContext & ctx, Mutex & mutex, const std::string & name)
 {
-  auto r = co_await mutex.lock();
-  if (r.ok()) {
-    RCLCPP_INFO(ctx.node()->get_logger(), "%s: acquired lock", name.c_str());
-    co_await ctx.sleep(std::chrono::seconds(1));
-    mutex.unlock();
-  }
+  co_await mutex.lock();
+  RCLCPP_INFO(ctx.node()->get_logger(), "%s: acquired lock", name.c_str());
+  co_await ctx.sleep(std::chrono::seconds(1));
+  mutex.unlock();
 }
 ```
 
@@ -319,12 +311,11 @@ std::thread worker([&ch]() {
 // Coroutine: receive values
 auto task = ctx.create_task([&]() -> Task<void> {
   while (true) {
-    auto r = co_await ch.next();
-    if (!r.ok() || !r.value->has_value()) {
-      break;                       // Channel closed or cancelled
+    auto val = co_await ch.next();
+    if (!val.has_value()) {
+      break;                       // Channel closed
     }
-    int val = *r.value.value();
-    RCLCPP_INFO(ctx.node()->get_logger(), "Received: %d", val);
+    RCLCPP_INFO(ctx.node()->get_logger(), "Received: %d", *val);
   }
 });
 ```
@@ -358,31 +349,53 @@ Task<void> run(CoContext & ctx)
 
 ## Result Type
 
-All `co_await` operations return `Result<T>`, which carries the outcome status:
+Operations that can timeout or fail return `Result<T>`:
 
 ```cpp
-auto result = co_await ctx.sleep(std::chrono::seconds(1));
+auto result = co_await ctx.wait_for_service(client, std::chrono::seconds(10));
 
 if (result.ok()) {
-  // Success
+  // Service is available
 } else if (result.timeout()) {
-  // Timed out (for wait_for_service, wait_for_action)
-} else if (result.cancelled()) {
-  // Task was cancelled
+  // Timed out
 }
 ```
 
-For operations that return a value (e.g., `send_request`), access it via `result.value.value()`.
+Most operations return their value directly (e.g., `send_request` returns `Response`, `sleep` returns `void`). `Result<T>` is only used when timeout or error is a normal outcome:
+
+| Operation | Return type | Uses Result? |
+|---|---|---|
+| `sleep` | `void` | No |
+| `send_request` | `Response` | No |
+| `stream->next()` | `optional<T>` | No |
+| `event.wait()` | `void` | No |
+| `mutex.lock()` | `void` | No |
+| `wait_for_service` | `Result<void>` | Yes (timeout) |
+| `wait_for_action` | `Result<void>` | Yes (timeout) |
+| `send_goal` | `Result<GoalStream>` | Yes (rejected) |
 
 ## Cancellation
 
-Calling `task.cancel()` cancels the task and automatically propagates cancellation to any `co_await` operation the task is currently suspended on.
+Calling `task.cancel()` cancels the task by throwing `CancelledException` at the current `co_await` suspension point. The exception propagates automatically through the coroutine chain -- no manual checking needed.
 
 ```cpp
 auto task = ctx.create_task(run(ctx));
 
 // Later...
-task.cancel();  // The running co_await will return Result with cancelled() == true
+task.cancel();  // Throws CancelledException at the current co_await
+```
+
+To handle cancellation explicitly, catch `CancelledException`:
+
+```cpp
+Task<void> run(CoContext & ctx)
+{
+  try {
+    co_await ctx.sleep(std::chrono::seconds(10));
+  } catch (const CancelledException &) {
+    RCLCPP_INFO(ctx.node()->get_logger(), "Cancelled!");
+  }
+}
 ```
 
 ## No Deadlocks on Single-Threaded Executors
@@ -403,10 +416,10 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `create_service<SrvT>(name, cb)` | `shared_ptr<Service<SrvT>>` | Create a coroutine service server |
 | `create_action_server<ActT>(name, cb)` | `shared_ptr<Server<ActT>>` | Create a coroutine action server |
 | `wait_for_service(client, timeout)` | *awaitable* `Result<void>` | Wait for a service |
-| `send_request<SrvT>(client, req)` | *awaitable* `Result<Response>` | Call a service |
+| `send_request<SrvT>(client, req)` | *awaitable* `Response` | Call a service |
 | `wait_for_action(client, timeout)` | *awaitable* `Result<void>` | Wait for an action server |
 | `send_goal<ActT>(client, goal)` | *awaitable* `Result<shared_ptr<GoalStream>>` | Send an action goal |
-| `sleep(duration)` | *awaitable* `Result<void>` | Async sleep |
+| `sleep(duration)` | *awaitable* `void` | Async sleep |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node::SharedPtr` | Access the underlying node |
 

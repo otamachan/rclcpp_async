@@ -173,8 +173,11 @@ TEST_F(MutexTest, CancelDuringLockWait)
   // Worker B tries to lock — will be suspended waiting
   auto worker_b = [&]() -> Task<void> {
     co_await ctx_->sleep(10ms);  // ensure A locks first
-    auto r = co_await mutex.lock();
-    was_cancelled = r.cancelled();
+    try {
+      co_await mutex.lock();
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
 
   auto task_a = ctx_->create_task(worker_a());
@@ -221,12 +224,12 @@ TEST_F(MutexTest, CancelDoesNotTransferLock)
     // Wait for A to hold the lock
     co_await ctx_->sleep(20ms);
     b_waiting = true;
-    auto r = co_await mutex.lock();
-    if (r.cancelled()) {
-      log.push_back("B:cancelled");
-    } else {
+    try {
+      co_await mutex.lock();
       log.push_back("B:enter");
       mutex.unlock();
+    } catch (const CancelledException &) {
+      log.push_back("B:cancelled");
     }
   };
 

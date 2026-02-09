@@ -23,7 +23,6 @@
 #include <utility>
 
 #include "rclcpp_async/cancellation_token.hpp"
-#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -65,17 +64,17 @@ public:
 
     void await_suspend(std::coroutine_handle<> h);
 
-    Result<std::optional<SharedPtr>> await_resume()
+    std::optional<SharedPtr> await_resume()
     {
       if (cancelled) {
-        return Result<std::optional<SharedPtr>>::Cancelled();
+        throw CancelledException{};
       }
       if (stream.closed_ && stream.queue_.empty()) {
-        return Result<std::optional<SharedPtr>>::Ok(std::nullopt);
+        return std::nullopt;
       }
       auto msg = std::move(stream.queue_.front());
       stream.queue_.pop();
-      return Result<std::optional<SharedPtr>>::Ok(std::move(msg));
+      return std::move(msg);
     }
   };
 

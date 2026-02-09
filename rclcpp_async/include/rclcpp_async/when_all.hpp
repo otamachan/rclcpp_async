@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <coroutine>
+#include <exception>
 #include <memory>
 #include <tuple>
 #include <type_traits>
@@ -49,6 +50,7 @@ struct JoinTask
   struct promise_type
   {
     std::shared_ptr<WhenAllState> state;
+    std::exception_ptr exception;
 
     JoinTask get_return_object()
     {
@@ -74,7 +76,7 @@ struct JoinTask
     FinalAwaiter final_suspend() noexcept { return {}; }
 
     void return_void() {}
-    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+    void unhandled_exception() { exception = std::current_exception(); }
 
     // Pass-through await_transform — child Task already has its own token
     template <typename A>
@@ -151,7 +153,15 @@ struct WhenAllAwaiter
     return state->remaining.fetch_sub(1) != 1;
   }
 
-  ResultTuple await_resume() { return std::move(*results); }
+  ResultTuple await_resume()
+  {
+    for (auto & jt : joins) {
+      if (jt.handle.promise().exception) {
+        std::rethrow_exception(jt.handle.promise().exception);
+      }
+    }
+    return std::move(*results);
+  }
 };
 
 // Factory function

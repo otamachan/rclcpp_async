@@ -81,7 +81,7 @@ TEST_F(CreateServiceTest, BasicCoroutineCallback)
   }
   ASSERT_TRUE(client_->service_is_ready());
 
-  Result<SetBool::Response::SharedPtr> result;
+  SetBool::Response::SharedPtr result;
   auto coro = [&]() -> Task<void> {
     auto req = std::make_shared<SetBool::Request>();
     req->data = true;
@@ -91,9 +91,9 @@ TEST_F(CreateServiceTest, BasicCoroutineCallback)
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  ASSERT_TRUE(result.ok());
-  EXPECT_TRUE(result.value.value()->success);
-  EXPECT_EQ(result.value.value()->message, "enabled");
+  ASSERT_TRUE(result != nullptr);
+  EXPECT_TRUE(result->success);
+  EXPECT_EQ(result->message, "enabled");
 }
 
 TEST_F(CreateServiceTest, CoroutineCallbackWithAwait)
@@ -116,7 +116,7 @@ TEST_F(CreateServiceTest, CoroutineCallbackWithAwait)
   }
   ASSERT_TRUE(client_->service_is_ready());
 
-  Result<SetBool::Response::SharedPtr> result;
+  SetBool::Response::SharedPtr result;
   auto coro = [&]() -> Task<void> {
     auto req = std::make_shared<SetBool::Request>();
     req->data = true;
@@ -126,7 +126,7 @@ TEST_F(CreateServiceTest, CoroutineCallbackWithAwait)
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  ASSERT_TRUE(result.ok());
-  EXPECT_TRUE(result.value.value()->success);
-  EXPECT_EQ(result.value.value()->message, "delayed");
+  ASSERT_TRUE(result != nullptr);
+  EXPECT_TRUE(result->success);
+  EXPECT_EQ(result->message, "delayed");
 }

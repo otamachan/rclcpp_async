@@ -164,8 +164,11 @@ TEST_F(EventTest, CancelDuringWait)
 
   bool was_cancelled = false;
   auto coro = [&]() -> Task<void> {
-    auto r = co_await event.wait();
-    was_cancelled = r.cancelled();
+    try {
+      co_await event.wait();
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
 
   auto task = coro();
@@ -191,8 +194,11 @@ TEST_F(EventTest, CancelDoesNotDoubleResume)
   bool was_cancelled = false;
   bool reached_end = false;
   auto coro = [&]() -> Task<void> {
-    auto r = co_await event.wait();
-    was_cancelled = r.cancelled();
+    try {
+      co_await event.wait();
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
     reached_end = true;
   };
 

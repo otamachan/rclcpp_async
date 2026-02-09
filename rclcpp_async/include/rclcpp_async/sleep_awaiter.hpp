@@ -20,7 +20,6 @@
 #include <utility>
 
 #include "rclcpp_async/cancellation_token.hpp"
-#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -33,7 +32,7 @@ struct SleepAwaiter
   std::chrono::nanoseconds duration;
   rclcpp::TimerBase::SharedPtr timer;
   CancellationToken * token = nullptr;
-  Result<void> result;
+  bool cancelled = false;
   bool done = false;
 
   void set_token(CancellationToken * t) { token = t; }
@@ -41,11 +40,10 @@ struct SleepAwaiter
   bool await_ready()
   {
     if (token && token->is_cancelled()) {
-      result = Result<void>::Cancelled();
+      cancelled = true;
       return true;
     }
     if (duration <= std::chrono::nanoseconds{0}) {
-      result = Result<void>::Ok();
       return true;
     }
     return false;
@@ -53,10 +51,12 @@ struct SleepAwaiter
 
   void await_suspend(std::coroutine_handle<> h);
 
-  Result<void> await_resume()
+  void await_resume()
   {
     timer.reset();
-    return std::move(result);
+    if (cancelled) {
+      throw CancelledException{};
+    }
   }
 };
 

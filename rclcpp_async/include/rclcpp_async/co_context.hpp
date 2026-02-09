@@ -252,14 +252,20 @@ public:
         [](CallbackT & cb, std::shared_ptr<GoalHandleT> gh) -> SpawnedTask {
           auto aborted = std::make_shared<bool>(false);
           GoalContext<ActionT> goal(gh, aborted);
-          auto result_value = co_await cb(std::move(goal));
-          auto result = std::make_shared<typename ActionT::Result>(std::move(result_value));
-          if (gh->is_canceling()) {
-            gh->canceled(result);
-          } else if (*aborted) {
-            gh->abort(result);
-          } else {
-            gh->succeed(result);
+          try {
+            auto result_value = co_await cb(std::move(goal));
+            auto result = std::make_shared<typename ActionT::Result>(std::move(result_value));
+            if (gh->is_canceling()) {
+              gh->canceled(result);
+            } else if (*aborted) {
+              gh->abort(result);
+            } else {
+              gh->succeed(result);
+            }
+          } catch (const CancelledException &) {
+            if (gh->is_active()) {
+              gh->abort(std::make_shared<typename ActionT::Result>());
+            }
           }
         }(cb, goal_handle);
       });
@@ -332,7 +338,7 @@ void WaitForReadyAwaiter<ReadyChecker>::await_suspend(std::coroutine_handle<> h)
       done = true;
       poll_timer->cancel();
       deadline_timer->cancel();
-      result = Result<void>::Cancelled();
+      cancelled = true;
     });
 }
 
@@ -345,7 +351,7 @@ void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
         return;
       }
       done = true;
-      result = Result<Response>::Ok(future.get());
+      response = future.get();
       ctx.resume(h);
     });
 
@@ -353,30 +359,29 @@ void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
     token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
-      result = Result<Response>::Cancelled();
+      cancelled = true;
     });
 }
 
 inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  auto finish = [this, h](Result<void> r) {
+  auto finish = [this, h]() {
     if (done) {
       return;
     }
     done = true;
     timer->cancel();
-    result = std::move(r);
     ctx.resume(h);
   };
 
-  timer = ctx.node()->create_wall_timer(duration, [finish]() { finish(Result<void>::Ok()); });
+  timer = ctx.node()->create_wall_timer(duration, [finish]() { finish(); });
 
   register_cancel(
     token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
       timer->cancel();
-      result = Result<void>::Cancelled();
+      cancelled = true;
     });
 }
 
@@ -478,7 +483,7 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
     token, ctx, h, [this]() { return done; },
     [this]() {
       done = true;
-      result = Result<std::shared_ptr<GoalStream<ActionT>>>::Cancelled();
+      cancelled = true;
     });
 }
 

@@ -27,7 +27,6 @@ TEST(ResultT, OkHoldsValue)
   auto r = Result<int>::Ok(42);
   EXPECT_TRUE(r.ok());
   EXPECT_FALSE(r.timeout());
-  EXPECT_FALSE(r.cancelled());
   ASSERT_TRUE(r.value.has_value());
   EXPECT_EQ(*r.value, 42);
 }
@@ -37,16 +36,6 @@ TEST(ResultT, TimeoutHasNoValue)
   auto r = Result<int>::Timeout();
   EXPECT_FALSE(r.ok());
   EXPECT_TRUE(r.timeout());
-  EXPECT_FALSE(r.cancelled());
-  EXPECT_FALSE(r.value.has_value());
-}
-
-TEST(ResultT, CancelledHasNoValue)
-{
-  auto r = Result<int>::Cancelled();
-  EXPECT_FALSE(r.ok());
-  EXPECT_FALSE(r.timeout());
-  EXPECT_TRUE(r.cancelled());
   EXPECT_FALSE(r.value.has_value());
 }
 
@@ -55,7 +44,6 @@ TEST(ResultT, ErrorHasMessage)
   auto r = Result<int>::Error("something went wrong");
   EXPECT_FALSE(r.ok());
   EXPECT_FALSE(r.timeout());
-  EXPECT_FALSE(r.cancelled());
   EXPECT_EQ(r.error_msg, "something went wrong");
   EXPECT_FALSE(r.value.has_value());
 }
@@ -76,7 +64,6 @@ TEST(ResultVoid, Ok)
   auto r = Result<void>::Ok();
   EXPECT_TRUE(r.ok());
   EXPECT_FALSE(r.timeout());
-  EXPECT_FALSE(r.cancelled());
 }
 
 TEST(ResultVoid, Timeout)
@@ -84,13 +71,6 @@ TEST(ResultVoid, Timeout)
   auto r = Result<void>::Timeout();
   EXPECT_FALSE(r.ok());
   EXPECT_TRUE(r.timeout());
-}
-
-TEST(ResultVoid, Cancelled)
-{
-  auto r = Result<void>::Cancelled();
-  EXPECT_FALSE(r.ok());
-  EXPECT_TRUE(r.cancelled());
 }
 
 TEST(ResultVoid, ErrorHasMessage)

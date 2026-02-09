@@ -146,8 +146,11 @@ TEST_F(TimerStreamTest, CancelDuringNext)
 
   auto coro = [&]() -> Task<void> {
     auto timer = ctx_->create_timer(10s);  // Very long period — will be suspended
-    auto r = co_await timer->next();
-    was_cancelled = r.cancelled();
+    try {
+      co_await timer->next();
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
     timer->cancel();
   };
 

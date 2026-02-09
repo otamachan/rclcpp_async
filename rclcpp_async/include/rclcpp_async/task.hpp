@@ -15,6 +15,7 @@
 #pragma once
 
 #include <coroutine>
+#include <exception>
 #include <optional>
 #include <utility>
 
@@ -33,6 +34,7 @@ struct Task
   struct promise_type
   {
     std::optional<T> value;
+    std::exception_ptr exception;
     std::coroutine_handle<> continuation;
     CancellationToken token;
 
@@ -73,7 +75,7 @@ struct Task
     }
 
     void return_value(T v) { value = std::move(v); }
-    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+    void unhandled_exception() { exception = std::current_exception(); }
   };
 
   std::coroutine_handle<promise_type> handle;
@@ -90,7 +92,13 @@ struct Task
     started_ = true;
     return handle;
   }
-  T await_resume() { return std::move(*handle.promise().value); }
+  T await_resume()
+  {
+    if (handle.promise().exception) {
+      std::rethrow_exception(handle.promise().exception);
+    }
+    return std::move(*handle.promise().value);
+  }
 
   void cancel() { handle.promise().token.cancel(); }
 
@@ -114,6 +122,7 @@ struct Task<void>
 {
   struct promise_type
   {
+    std::exception_ptr exception;
     std::coroutine_handle<> continuation;
     CancellationToken token;
 
@@ -154,7 +163,7 @@ struct Task<void>
     }
 
     void return_void() {}
-    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+    void unhandled_exception() { exception = std::current_exception(); }
   };
 
   std::coroutine_handle<promise_type> handle;
@@ -170,7 +179,12 @@ struct Task<void>
     started_ = true;
     return handle;
   }
-  void await_resume() {}
+  void await_resume()
+  {
+    if (handle.promise().exception) {
+      std::rethrow_exception(handle.promise().exception);
+    }
+  }
 
   void cancel() { handle.promise().token.cancel(); }
 
@@ -217,7 +231,14 @@ struct SpawnedTask
     }
 
     void return_void() {}
-    void unhandled_exception() { std::rethrow_exception(std::current_exception()); }
+    void unhandled_exception()
+    {
+      try {
+        std::rethrow_exception(std::current_exception());
+      } catch (const CancelledException &) {
+        // Swallow cancellation in fire-and-forget tasks
+      }
+    }
   };
 };
 

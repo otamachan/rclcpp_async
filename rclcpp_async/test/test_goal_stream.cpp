@@ -143,11 +143,8 @@ TEST_F(GoalStreamTest, SendGoalAndReceiveResult)
 
     auto stream = *goal_result.value;
     while (true) {
-      auto r = co_await stream->next();
-      if (!r.ok()) {
-        break;
-      }
-      if (!r.value->has_value()) {
+      auto feedback = co_await stream->next();
+      if (!feedback.has_value()) {
         break;
       }
       got_feedback = true;
@@ -226,8 +223,8 @@ TEST_F(GoalStreamTest, CancelGoal)
 
     // Receive a few feedbacks, then cancel
     while (true) {
-      auto r = co_await stream->next();
-      if (!r.ok() || !r.value->has_value()) {
+      auto feedback = co_await stream->next();
+      if (!feedback.has_value()) {
         break;
       }
       feedback_count++;
@@ -265,8 +262,11 @@ TEST_F(GoalStreamTest, AlreadyCancelledIsImmediate)
   auto coro = [&]() -> Task<void> {
     Fibonacci::Goal goal;
     goal.order = 5;
-    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
-    was_cancelled = goal_result.cancelled();
+    try {
+      co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
 
   auto task = coro();
@@ -297,13 +297,16 @@ TEST_F(GoalStreamTest, CancelDuringSendGoal)
     Fibonacci::Goal goal;
     goal.order = 5;
 
-    // Use a timer to cancel during send_goal
-    auto timer = ctx_->create_timer(10ms);
-    co_await timer->next();
-    timer->cancel();
+    try {
+      // Use a timer to burn some time; cancel may fire here or during send_goal
+      auto timer = ctx_->create_timer(10ms);
+      co_await timer->next();
+      timer->cancel();
 
-    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
-    was_cancelled = goal_result.cancelled();
+      co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
   };
 
   auto task = coro();
@@ -341,16 +344,16 @@ TEST_F(GoalStreamTest, CancelDuringFeedback)
     }
 
     auto stream = *goal_result.value;
-    while (true) {
-      auto r = co_await stream->next();
-      if (r.cancelled()) {
-        was_cancelled = true;
-        break;
+    try {
+      while (true) {
+        auto feedback = co_await stream->next();
+        if (!feedback.has_value()) {
+          break;
+        }
+        feedback_count++;
       }
-      if (!r.ok() || !r.value->has_value()) {
-        break;
-      }
-      feedback_count++;
+    } catch (const CancelledException &) {
+      was_cancelled = true;
     }
   };
 

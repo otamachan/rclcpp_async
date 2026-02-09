@@ -123,8 +123,14 @@ TEST_F(WaitForServiceTest, Timeout)
 
 TEST_F(WaitForServiceTest, Cancel)
 {
-  Result<void> result;
-  auto coro = [&]() -> Task<void> { result = co_await ctx_->wait_for_service(client_, 10s); };
+  bool was_cancelled = false;
+  auto coro = [&]() -> Task<void> {
+    try {
+      co_await ctx_->wait_for_service(client_, 10s);
+    } catch (const CancelledException &) {
+      was_cancelled = true;
+    }
+  };
   auto task = ctx_->create_task(coro());
 
   executor_.spin_some();
@@ -135,5 +141,5 @@ TEST_F(WaitForServiceTest, Cancel)
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  EXPECT_TRUE(result.cancelled());
+  EXPECT_TRUE(was_cancelled);
 }

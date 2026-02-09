@@ -20,7 +20,6 @@
 #include <utility>
 
 #include "rclcpp_async/cancellation_token.hpp"
-#include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
@@ -36,7 +35,8 @@ struct SendRequestAwaiter
   typename rclcpp::Client<ServiceT>::SharedPtr client;
   typename ServiceT::Request::SharedPtr request;
   CancellationToken * token = nullptr;
-  Result<Response> result;
+  Response response;
+  bool cancelled = false;
   bool done = false;
 
   void set_token(CancellationToken * t) { token = t; }
@@ -44,7 +44,7 @@ struct SendRequestAwaiter
   bool await_ready()
   {
     if (token && token->is_cancelled()) {
-      result = Result<Response>::Cancelled();
+      cancelled = true;
       return true;
     }
     return false;
@@ -53,7 +53,13 @@ struct SendRequestAwaiter
   // Defined inline because it's a template
   void await_suspend(std::coroutine_handle<> h);
 
-  Result<Response> await_resume() { return std::move(result); }
+  Response await_resume()
+  {
+    if (cancelled) {
+      throw CancelledException{};
+    }
+    return std::move(response);
+  }
 };
 
 }  // namespace rclcpp_async
