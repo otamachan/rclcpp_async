@@ -41,8 +41,7 @@
 #include "rclcpp_async/task.hpp"
 #include "rclcpp_async/timer_stream.hpp"
 #include "rclcpp_async/topic_stream.hpp"
-#include "rclcpp_async/wait_for_action_awaiter.hpp"
-#include "rclcpp_async/wait_for_service_awaiter.hpp"
+#include "rclcpp_async/wait_for_ready_awaiter.hpp"
 
 namespace rclcpp_async
 {
@@ -148,8 +147,8 @@ public:
   WaitForServiceAwaiter wait_for_service(
     rclcpp::ClientBase::SharedPtr client, std::chrono::nanoseconds timeout = 5s)
   {
-    return WaitForServiceAwaiter{*this,   std::move(client), timeout, nullptr,
-                                 nullptr, nullptr,           {},      false};
+    return WaitForServiceAwaiter{
+      *this, ServiceReadyChecker{std::move(client)}, timeout, nullptr, nullptr, nullptr, {}, false};
   }
 
   template <typename ServiceT>
@@ -170,8 +169,9 @@ public:
   WaitForActionAwaiter<ActionT> wait_for_action(
     std::shared_ptr<rclcpp_action::Client<ActionT>> client, std::chrono::nanoseconds timeout = 5s)
   {
-    return WaitForActionAwaiter<ActionT>{*this,   std::move(client), timeout, nullptr,
-                                         nullptr, nullptr,           {},      false};
+    return WaitForActionAwaiter<ActionT>{
+      *this, ActionReadyChecker<ActionT>{std::move(client)}, timeout, nullptr, nullptr, nullptr, {},
+      false};
   }
 
   template <typename MsgT>
@@ -284,7 +284,8 @@ public:
 // Awaiter await_suspend implementations (need full CoContext)
 // ============================================================
 
-inline void WaitForServiceAwaiter::await_suspend(std::coroutine_handle<> h)
+template <typename ReadyChecker>
+void WaitForReadyAwaiter<ReadyChecker>::await_suspend(std::coroutine_handle<> h)
 {
   auto finish = [this, h](Result<void> r) {
     if (done) {
@@ -298,7 +299,7 @@ inline void WaitForServiceAwaiter::await_suspend(std::coroutine_handle<> h)
   };
 
   poll_timer = ctx.node()->create_wall_timer(100ms, [this, finish]() {
-    if (client->service_is_ready()) {
+    if (checker.is_ready()) {
       finish(Result<void>::Ok());
     }
   });
@@ -352,35 +353,6 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
   };
 
   timer = ctx.node()->create_wall_timer(duration, [finish]() { finish(Result<void>::Ok()); });
-
-  if (token) {
-    token->on_cancel(
-      [this, finish]() { ctx.post([finish]() { finish(Result<void>::Cancelled()); }); });
-  }
-}
-
-template <typename ActionT>
-void WaitForActionAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
-{
-  auto finish = [this, h](Result<void> r) {
-    if (done) {
-      return;
-    }
-    done = true;
-    poll_timer->cancel();
-    deadline_timer->cancel();
-    result = std::move(r);
-    ctx.resume(h);
-  };
-
-  poll_timer = ctx.node()->create_wall_timer(100ms, [this, finish]() {
-    if (client->action_server_is_ready()) {
-      finish(Result<void>::Ok());
-    }
-  });
-
-  deadline_timer =
-    ctx.node()->create_wall_timer(timeout, [finish]() { finish(Result<void>::Timeout()); });
 
   if (token) {
     token->on_cancel(

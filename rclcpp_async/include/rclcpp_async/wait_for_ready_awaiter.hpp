@@ -29,11 +29,24 @@ namespace rclcpp_async
 
 class CoContext;
 
+struct ServiceReadyChecker
+{
+  rclcpp::ClientBase::SharedPtr client;
+  bool is_ready() const { return client->service_is_ready(); }
+};
+
 template <typename ActionT>
-struct WaitForActionAwaiter
+struct ActionReadyChecker
+{
+  std::shared_ptr<rclcpp_action::Client<ActionT>> client;
+  bool is_ready() const { return client->action_server_is_ready(); }
+};
+
+template <typename ReadyChecker>
+struct WaitForReadyAwaiter
 {
   CoContext & ctx;
-  std::shared_ptr<rclcpp_action::Client<ActionT>> client;
+  ReadyChecker checker;
   std::chrono::nanoseconds timeout;
   rclcpp::TimerBase::SharedPtr poll_timer;
   rclcpp::TimerBase::SharedPtr deadline_timer;
@@ -49,7 +62,7 @@ struct WaitForActionAwaiter
       result = Result<void>::Cancelled();
       return true;
     }
-    if (client->action_server_is_ready()) {
+    if (checker.is_ready()) {
       result = Result<void>::Ok();
       return true;
     }
@@ -65,5 +78,11 @@ struct WaitForActionAwaiter
     return std::move(result);
   }
 };
+
+// Type aliases for backward compatibility
+using WaitForServiceAwaiter = WaitForReadyAwaiter<ServiceReadyChecker>;
+
+template <typename ActionT>
+using WaitForActionAwaiter = WaitForReadyAwaiter<ActionReadyChecker<ActionT>>;
 
 }  // namespace rclcpp_async
