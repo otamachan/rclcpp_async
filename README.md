@@ -5,12 +5,14 @@ A header-only C++20 coroutine library that brings `async/await` to ROS 2, inspir
 Write asynchronous ROS 2 code that reads like sequential code -- no callback nesting, no deadlocks on single-threaded executors.
 
 ```cpp
+// Send two service requests in parallel with a 5s timeout
 auto result = co_await ctx.wait_for(
   when_all(
     ctx.send_request<Srv1>(client1, req1),
     ctx.send_request<Srv2>(client2, req2)),
   5s);
 
+// Both completed within 5s -- get the responses
 if (result.ok()) {
   auto [resp1, resp2] = *result.value;
 }
