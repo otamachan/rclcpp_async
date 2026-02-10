@@ -24,6 +24,7 @@
 #include "rclcpp_async/result.hpp"
 #include "rclcpp_async/single_goal_action_server.hpp"
 #include "rclcpp_async/task.hpp"
+#include "rclcpp_async/tf_buffer.hpp"
 #include "rclcpp_async/timer_stream.hpp"
 #include "rclcpp_async/topic_stream.hpp"
 #include "rclcpp_async/when_all.hpp"
