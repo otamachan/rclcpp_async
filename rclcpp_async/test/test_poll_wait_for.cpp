@@ -57,33 +57,30 @@ protected:
 
 TEST_F(PollWaitForTest, PollImmediatelyReady)
 {
-  bool reached = false;
+  Result<void> res = Result<void>::Timeout();
   auto coro = [&]() -> Task<void> {
-    co_await ctx_->poll([]() { return true; }, 100ms);
-    reached = true;
+    res = co_await ctx_->poll_until([]() { return true; }, 100ms, 5s);
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  EXPECT_TRUE(reached);
+  EXPECT_TRUE(res.ok());
 }
 
 TEST_F(PollWaitForTest, PollBecomesReady)
 {
   int counter = 0;
-  bool reached = false;
+  Result<void> res = Result<void>::Timeout();
   auto coro = [&]() -> Task<void> {
-    co_await ctx_->poll([&]() { return counter >= 3; }, 10ms);
-    reached = true;
+    auto timer = node_->create_wall_timer(10ms, [&counter]() { counter++; });
+    res = co_await ctx_->poll_until([&]() { return counter >= 3; }, 10ms, 5s);
   };
   auto task = ctx_->create_task(coro());
-
-  auto timer = node_->create_wall_timer(10ms, [&counter]() { counter++; });
   spin_until_done(task);
 
   ASSERT_TRUE(task.handle.done());
-  EXPECT_TRUE(reached);
+  EXPECT_TRUE(res.ok());
   EXPECT_GE(counter, 3);
 }
 
@@ -121,7 +118,7 @@ TEST_F(PollWaitForTest, PollWithTimeout)
   Result<void> res = Result<void>::Timeout();
   auto coro = [&]() -> Task<void> {
     auto timer = node_->create_wall_timer(10ms, [&counter]() { counter++; });
-    res = co_await ctx_->wait_for(ctx_->poll([&]() { return counter >= 3; }, 10ms), 5s);
+    res = co_await ctx_->poll_until([&]() { return counter >= 3; }, 10ms, 5s);
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
@@ -157,7 +154,7 @@ TEST_F(PollWaitForTest, PollWithTimeoutTimesOut)
 {
   Result<void> res = Result<void>::Ok();
   auto coro = [&]() -> Task<void> {
-    res = co_await ctx_->wait_for(ctx_->poll([]() { return false; }, 10ms), 50ms);
+    res = co_await ctx_->poll_until([]() { return false; }, 10ms, 50ms);
   };
   auto task = ctx_->create_task(coro());
   spin_until_done(task);
