@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <stop_token>
+
 #include "rclcpp_async/task.hpp"
 
 using namespace rclcpp_async;  // NOLINT(build/namespaces)
@@ -103,17 +105,17 @@ TEST(TaskT, MultipleCoAwait)
 TEST(TaskT, CancelSetsToken)
 {
   auto task = returns_42();
-  EXPECT_FALSE(task.handle.promise().token.is_cancelled());
+  EXPECT_FALSE(task.handle.promise().stop_source.stop_requested());
   task.cancel();
-  EXPECT_TRUE(task.handle.promise().token.is_cancelled());
+  EXPECT_TRUE(task.handle.promise().stop_source.stop_requested());
 }
 
 TEST(TaskVoid, CancelSetsToken)
 {
   auto task = does_nothing();
-  EXPECT_FALSE(task.handle.promise().token.is_cancelled());
+  EXPECT_FALSE(task.handle.promise().stop_source.stop_requested());
   task.cancel();
-  EXPECT_TRUE(task.handle.promise().token.is_cancelled());
+  EXPECT_TRUE(task.handle.promise().stop_source.stop_requested());
 }
 
 // ============================================================
@@ -185,8 +187,8 @@ TEST(TaskVoid, ExceptionPropagation)
 
 struct MockCancellableAwaiter
 {
-  CancellationToken * token = nullptr;
-  void set_token(CancellationToken * t) { token = t; }
+  std::stop_token token;
+  void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready() { return true; }
   void await_suspend(std::coroutine_handle<>) {}

@@ -15,20 +15,24 @@
 #pragma once
 
 #include <coroutine>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <queue>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <stop_token>
 #include <utility>
 
-#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/cancelled_exception.hpp"
 #include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
 
 class CoContext;
+
+using StopCb = std::stop_callback<std::function<void()>>;
 
 template <typename ActionT>
 struct GoalEvent
@@ -91,14 +95,15 @@ public:
     using Feedback = std::shared_ptr<const typename ActionT::Feedback>;
 
     GoalStream & stream;
-    CancellationToken * token = nullptr;
+    std::stop_token token;
+    std::optional<StopCb> cancel_cb_;
     bool cancelled = false;
 
-    void set_token(CancellationToken * t) { token = t; }
+    void set_token(std::stop_token t) { token = std::move(t); }
 
     bool await_ready()
     {
-      if (token && token->is_cancelled()) {
+      if (token.stop_requested()) {
         cancelled = true;
         return true;
       }
@@ -109,6 +114,7 @@ public:
 
     std::optional<Feedback> await_resume()
     {
+      cancel_cb_.reset();
       if (cancelled) {
         throw CancelledException{};
       }
@@ -122,7 +128,7 @@ public:
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this}; }
+  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false}; }
 
   using CancelResponse = typename ActionT::Impl::CancelGoalService::Response;
 
@@ -150,17 +156,18 @@ struct SendGoalAwaiter
   typename rclcpp_action::Client<ActionT>::SharedPtr client;
   typename ActionT::Goal goal;
   std::shared_ptr<GoalStream<ActionT>> stream;
-  CancellationToken * token = nullptr;
+  std::stop_token token;
+  std::optional<StopCb> cancel_cb_;
   Result<std::shared_ptr<GoalStream<ActionT>>> result;
   bool done = false;
 
   bool cancelled = false;
 
-  void set_token(CancellationToken * t) { token = t; }
+  void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready()
   {
-    if (token && token->is_cancelled()) {
+    if (token.stop_requested()) {
       cancelled = true;
       return true;
     }
@@ -171,6 +178,7 @@ struct SendGoalAwaiter
 
   Result<std::shared_ptr<GoalStream<ActionT>>> await_resume()
   {
+    cancel_cb_.reset();
     if (cancelled) {
       throw CancelledException{};
     }

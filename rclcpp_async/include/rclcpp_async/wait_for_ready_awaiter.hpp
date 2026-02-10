@@ -16,18 +16,23 @@
 
 #include <chrono>
 #include <coroutine>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <stop_token>
 #include <utility>
 
-#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/cancelled_exception.hpp"
 #include "rclcpp_async/result.hpp"
 
 namespace rclcpp_async
 {
 
 class CoContext;
+
+using StopCb = std::stop_callback<std::function<void()>>;
 
 struct ServiceReadyChecker
 {
@@ -50,17 +55,18 @@ struct WaitForReadyAwaiter
   std::chrono::nanoseconds timeout;
   rclcpp::TimerBase::SharedPtr poll_timer;
   rclcpp::TimerBase::SharedPtr deadline_timer;
-  CancellationToken * token = nullptr;
+  std::stop_token token;
+  std::optional<StopCb> cancel_cb_;
   Result<void> result;
   bool done = false;
 
-  void set_token(CancellationToken * t) { token = t; }
+  void set_token(std::stop_token t) { token = std::move(t); }
 
   bool cancelled = false;
 
   bool await_ready()
   {
-    if (token && token->is_cancelled()) {
+    if (token.stop_requested()) {
       cancelled = true;
       return true;
     }
@@ -75,6 +81,7 @@ struct WaitForReadyAwaiter
 
   Result<void> await_resume()
   {
+    cancel_cb_.reset();
     poll_timer.reset();
     deadline_timer.reset();
     if (cancelled) {

@@ -17,16 +17,17 @@
 #include <coroutine>
 #include <exception>
 #include <optional>
+#include <stop_token>
 #include <utility>
 
-#include "rclcpp_async/cancellation_token.hpp"
+#include "rclcpp_async/cancelled_exception.hpp"
 
 namespace rclcpp_async
 {
 
 template <typename T>
 concept Cancellable =
-  requires(T t, CancellationToken * token) { t.set_token(token); };  // NOLINT(readability/braces)
+  requires(T t, std::stop_token token) { t.set_token(token); };  // NOLINT(readability/braces)
 
 template <typename T = void>
 struct Task
@@ -36,7 +37,7 @@ struct Task
     std::optional<T> value;
     std::exception_ptr exception;
     std::coroutine_handle<> continuation;
-    CancellationToken token;
+    std::stop_source stop_source;
 
     Task get_return_object()
     {
@@ -63,7 +64,7 @@ struct Task
     template <Cancellable A>
     A && await_transform(A && awaiter)
     {
-      awaiter.set_token(&token);
+      awaiter.set_token(stop_source.get_token());
       return std::forward<A>(awaiter);
     }
 
@@ -100,7 +101,7 @@ struct Task
     return std::move(*handle.promise().value);
   }
 
-  void cancel() { handle.promise().token.cancel(); }
+  void cancel() { handle.promise().stop_source.request_stop(); }
 
   ~Task()
   {
@@ -124,7 +125,7 @@ struct Task<void>
   {
     std::exception_ptr exception;
     std::coroutine_handle<> continuation;
-    CancellationToken token;
+    std::stop_source stop_source;
 
     Task get_return_object()
     {
@@ -151,7 +152,7 @@ struct Task<void>
     template <Cancellable A>
     A && await_transform(A && awaiter)
     {
-      awaiter.set_token(&token);
+      awaiter.set_token(stop_source.get_token());
       return std::forward<A>(awaiter);
     }
 
@@ -186,7 +187,7 @@ struct Task<void>
     }
   }
 
-  void cancel() { handle.promise().token.cancel(); }
+  void cancel() { handle.promise().stop_source.request_stop(); }
 
   ~Task()
   {
@@ -209,7 +210,7 @@ struct SpawnedTask
 {
   struct promise_type
   {
-    CancellationToken token;
+    std::stop_source stop_source;
 
     SpawnedTask get_return_object() { return {}; }
 
@@ -219,7 +220,7 @@ struct SpawnedTask
     template <Cancellable A>
     A && await_transform(A && awaiter)
     {
-      awaiter.set_token(&token);
+      awaiter.set_token(stop_source.get_token());
       return std::forward<A>(awaiter);
     }
 
