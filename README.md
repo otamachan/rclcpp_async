@@ -2,7 +2,7 @@
 
 A header-only C++20 coroutine library that brings `async/await` to ROS 2, inspired by [icey](https://github.com/iv461/icey).
 
-Write asynchronous ROS 2 code that reads like sequential code -- no callback nesting, no deadlocks on single-threaded executors.
+Write asynchronous ROS 2 code that reads like sequential code -- no callback nesting, no deadlocks, no `std::mutex`, no state machines -- all on a single-threaded executor.
 
 ```cpp
 // Send two service requests in parallel with a 5s timeout
