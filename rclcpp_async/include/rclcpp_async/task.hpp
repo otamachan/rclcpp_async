@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <stop_token>
+#include <type_traits>
 #include <utility>
 
 #include "rclcpp_async/cancelled_exception.hpp"
@@ -276,5 +277,25 @@ struct SpawnedTask
     }
   };
 };
+
+template <typename T>
+inline constexpr bool is_task_v = false;
+template <typename T>
+inline constexpr bool is_task_v<Task<T>> = true;
+
+template <typename A>
+auto as_task(A a)
+{
+  if constexpr (is_task_v<A>) {
+    return std::move(a);
+  } else {
+    using T = std::decay_t<decltype(a.await_resume())>;
+    if constexpr (std::is_void_v<T>) {
+      return [](A x) -> Task<void> { co_await std::move(x); }(std::move(a));
+    } else {
+      return [](A x) -> Task<T> { co_return co_await std::move(x); }(std::move(a));
+    }
+  }
+}
 
 }  // namespace rclcpp_async

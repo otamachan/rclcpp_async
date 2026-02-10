@@ -222,4 +222,11 @@ WhenAnyAwaiter<Ts...> when_any(Task<Ts>... tasks)
     std::move(state), std::move(result), std::move(joins), child_sources, {}, {}};
 }
 
+template <typename... Awaitables>
+auto when_any(Awaitables... awaitables)
+  requires(!(is_task_v<Awaitables> && ...))
+{
+  return when_any(as_task(std::move(awaitables))...);
+}
+
 }  // namespace rclcpp_async

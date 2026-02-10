@@ -25,6 +25,14 @@ using namespace rclcpp_async;  // NOLINT(build/namespaces)
 
 using StopCb = std::stop_callback<std::function<void()>>;
 
+struct IntAwaiter
+{
+  int value;
+  bool await_ready() { return true; }
+  void await_suspend(std::coroutine_handle<>) {}
+  int await_resume() { return value; }
+};
+
 Task<int> returns_int(int v) { co_return v; }
 
 Task<std::string> returns_string(std::string s) { co_return s; }
@@ -137,4 +145,34 @@ TEST(WhenAny, ChainedInnerTasks)
   // adds_two_tasks completes first (synchronous), result is 30
   EXPECT_EQ(result.index(), 0u);
   EXPECT_EQ(std::get<0>(result), 30);
+}
+
+Task<std::variant<int, int>> two_awaitables_race()
+{
+  co_return co_await when_any(IntAwaiter{10}, IntAwaiter{20});
+}
+
+TEST(WhenAny, AwaitablesOnly)
+{
+  auto task = two_awaitables_race();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  auto result = *task.handle.promise().value;
+  EXPECT_EQ(result.index(), 0u);
+  EXPECT_EQ(std::get<0>(result), 10);
+}
+
+Task<std::variant<int, int>> mixed_task_and_awaitable_race()
+{
+  co_return co_await when_any(returns_int(1), IntAwaiter{2});
+}
+
+TEST(WhenAny, MixedTaskAndAwaitable)
+{
+  auto task = mixed_task_and_awaitable_race();
+  task.handle.resume();
+  ASSERT_TRUE(task.handle.done());
+  auto result = *task.handle.promise().value;
+  EXPECT_EQ(result.index(), 0u);
+  EXPECT_EQ(std::get<0>(result), 1);
 }

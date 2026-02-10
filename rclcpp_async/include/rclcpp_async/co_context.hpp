@@ -269,17 +269,8 @@ public:
 
   template <typename Awaitable>
   auto wait_for(Awaitable awaitable, std::chrono::nanoseconds timeout)
-    -> Task<Result<std::decay_t<decltype(awaitable.await_resume())>>>
   {
-    using T = std::decay_t<decltype(awaitable.await_resume())>;
-    if constexpr (std::is_void_v<T>) {
-      return wait_for(
-        [](Awaitable a) -> Task<void> { co_await std::move(a); }(std::move(awaitable)), timeout);
-    } else {
-      return wait_for<T>(
-        [](Awaitable a) -> Task<T> { co_return co_await std::move(a); }(std::move(awaitable)),
-        timeout);
-    }
+    return wait_for(as_task(std::move(awaitable)), timeout);
   }
 
   template <typename ActionT, typename CallbackT, typename GoalCbT, typename CancelCbT>
