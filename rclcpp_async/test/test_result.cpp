@@ -18,10 +18,6 @@
 
 using namespace rclcpp_async;  // NOLINT(build/namespaces)
 
-// ============================================================
-// Result<T>
-// ============================================================
-
 TEST(ResultT, OkHoldsValue)
 {
   auto r = Result<int>::Ok(42);
@@ -54,10 +50,6 @@ TEST(ResultT, OkWithStringValue)
   EXPECT_TRUE(r.ok());
   EXPECT_EQ(*r.value, "hello");
 }
-
-// ============================================================
-// Result<void>
-// ============================================================
 
 TEST(ResultVoid, Ok)
 {

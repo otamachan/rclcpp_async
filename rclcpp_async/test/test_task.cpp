@@ -20,10 +20,6 @@
 
 using namespace rclcpp_async;  // NOLINT(build/namespaces)
 
-// ============================================================
-// Task<T>
-// ============================================================
-
 Task<int> returns_42() { co_return 42; }
 
 TEST(TaskT, ReturnsValue)
@@ -48,10 +44,6 @@ TEST(TaskT, ReturnsString)
   EXPECT_EQ(*task.handle.promise().value, "hello");
 }
 
-// ============================================================
-// Task<void>
-// ============================================================
-
 Task<void> does_nothing() { co_return; }
 
 TEST(TaskVoid, CompletesSuccessfully)
@@ -62,10 +54,6 @@ TEST(TaskVoid, CompletesSuccessfully)
   task.handle.resume();
   EXPECT_TRUE(task.handle.done());
 }
-
-// ============================================================
-// Coroutine chaining
-// ============================================================
 
 Task<int> inner_task() { co_return 10; }
 
@@ -98,10 +86,6 @@ TEST(TaskT, MultipleCoAwait)
   EXPECT_EQ(*task.handle.promise().value, 20);
 }
 
-// ============================================================
-// Cancel
-// ============================================================
-
 TEST(TaskT, CancelSetsToken)
 {
   auto task = returns_42();
@@ -118,10 +102,6 @@ TEST(TaskVoid, CancelSetsToken)
   EXPECT_TRUE(task.handle.promise().stop_source.stop_requested());
 }
 
-// ============================================================
-// Move semantics
-// ============================================================
-
 TEST(TaskT, MoveConstructor)
 {
   auto task1 = returns_42();
@@ -131,10 +111,6 @@ TEST(TaskT, MoveConstructor)
   EXPECT_EQ(task1.handle, nullptr);
   EXPECT_EQ(task2.handle, handle);
 }
-
-// ============================================================
-// Exception propagation
-// ============================================================
 
 Task<int> throws_runtime_error()
 {
@@ -181,10 +157,6 @@ TEST(TaskVoid, ExceptionPropagation)
   EXPECT_TRUE(task.handle.promise().exception != nullptr);
 }
 
-// ============================================================
-// await_transform with Cancellable concept
-// ============================================================
-
 struct MockCancellableAwaiter
 {
   std::stop_token token;
@@ -208,10 +180,6 @@ TEST(TaskT, AwaitTransformSetsCancellationToken)
   EXPECT_TRUE(task.handle.done());
   EXPECT_EQ(*task.handle.promise().value, 99);
 }
-
-// ============================================================
-// co_await started task (like Python's await create_task())
-// ============================================================
 
 Task<int> await_started_value()
 {
