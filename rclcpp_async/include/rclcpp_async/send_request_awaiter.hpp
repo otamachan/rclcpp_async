@@ -41,7 +41,7 @@ struct SendRequestAwaiter
   typename ServiceT::Request::SharedPtr request;
   std::stop_token token;
   Response response;
-  std::optional<StopCb> cancel_cb_;
+  std::unique_ptr<StopCb> cancel_cb_;
   bool cancelled = false;
   bool done = false;
 

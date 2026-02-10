@@ -417,6 +417,40 @@ Task<void> run(CoContext & ctx)
 
 `void` tasks produce `std::monostate` in the variant. Cancellation of the parent task propagates to all child tasks.
 
+### poll / wait_for
+
+`poll` and `wait_for` are composable primitives for polling a condition with a timeout.
+
+- `ctx.poll(pred, interval)` returns a `Task<void>` that loops until `pred()` returns true, sleeping for `interval` between checks.
+- `ctx.wait_for(task, timeout)` races a task against a timeout using `when_any`, returning `Result<T>`.
+- `ctx.wait_for(awaitable, timeout)` also accepts any awaitable directly (e.g., `sleep`, `send_request`), wrapping it in a `Task` automatically.
+
+```cpp
+Task<void> run(CoContext & ctx)
+{
+  auto client = ctx.node()->create_client<SetBool>("set_bool");
+
+  // Poll until a condition is met, with a timeout
+  auto result = co_await ctx.wait_for(
+    ctx.poll([&]() { return client->service_is_ready(); }, 100ms), 5s);
+
+  if (result.timeout()) {
+    RCLCPP_ERROR(ctx.node()->get_logger(), "Timed out");
+    co_return;
+  }
+
+  // Pass an awaitable directly -- no need to wrap in a Task
+  auto req = std::make_shared<SetBool::Request>();
+  req->data = true;
+  auto resp = co_await ctx.wait_for(ctx.send_request<SetBool>(client, req), 5s);
+  if (resp.ok()) {
+    RCLCPP_INFO(ctx.node()->get_logger(), "Response: %s", resp.value->message.c_str());
+  }
+}
+```
+
+`wait_for_service` and `wait_for_action` are built on top of these primitives. Cancellation propagates automatically through the entire chain.
+
 ## Result Type
 
 Operations that can timeout or fail return `Result<T>`:
@@ -440,6 +474,8 @@ Most operations return their value directly (e.g., `send_request` returns `Respo
 | `stream->next()` | `optional<T>` | No |
 | `event.wait()` | `void` | No |
 | `mutex.lock()` | `void` | No |
+| `poll` | `void` | No |
+| `wait_for` | `Result<T>` | Yes (timeout) |
 | `wait_for_service` | `Result<void>` | Yes (timeout) |
 | `wait_for_action` | `Result<void>` | Yes (timeout) |
 | `send_goal` | `Result<GoalStream>` | Yes (rejected) |
@@ -491,6 +527,8 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `wait_for_action(client, timeout)` | *awaitable* `Result<void>` | Wait for an action server |
 | `send_goal<ActT>(client, goal)` | *awaitable* `Result<shared_ptr<GoalStream>>` | Send an action goal |
 | `sleep(duration)` | *awaitable* `void` | Async sleep |
+| `poll(pred, interval)` | `Task<void>` | Poll until predicate is true |
+| `wait_for(awaitable, timeout)` | `Task<Result<T>>` | Race an awaitable against a timeout |
 | `when_all(tasks...)` | *awaitable* `tuple<Ts...>` | Await all tasks concurrently |
 | `when_any(tasks...)` | *awaitable* `variant<Ts...>` | Race tasks, return first result |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |

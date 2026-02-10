@@ -131,6 +131,28 @@ TEST_F(PollWaitForTest, PollWithTimeout)
   EXPECT_GE(counter, 3);
 }
 
+TEST_F(PollWaitForTest, WaitForAwaitableCompletes)
+{
+  Result<void> res = Result<void>::Timeout();
+  auto coro = [&]() -> Task<void> { res = co_await ctx_->wait_for(ctx_->sleep(10ms), 5s); };
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(res.ok());
+}
+
+TEST_F(PollWaitForTest, WaitForAwaitableTimesOut)
+{
+  Result<void> res = Result<void>::Ok();
+  auto coro = [&]() -> Task<void> { res = co_await ctx_->wait_for(ctx_->sleep(5s), 50ms); };
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(res.timeout());
+}
+
 TEST_F(PollWaitForTest, PollWithTimeoutTimesOut)
 {
   Result<void> res = Result<void>::Ok();
