@@ -207,6 +207,45 @@ auto action_server = ctx.create_action_server<Fibonacci>(
 | `goal.publish_feedback(fb)` | Send feedback to the client |
 | `goal.abort()` | Abort the goal |
 
+### Single-Goal Action Server
+
+`create_single_goal_action_server<ActionT>(ctx, name, callback)` creates an action server that executes only one goal at a time. When a new goal arrives while another is executing, the previous goal is preempted via `CancelledException` and the new goal starts only after the previous goal has fully completed.
+
+```cpp
+auto server = create_single_goal_action_server<Fibonacci>(
+  ctx, "fibonacci",
+  [&ctx](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
+    Fibonacci::Feedback feedback;
+    feedback.sequence = {0, 1};
+
+    for (int i = 2; i < goal.goal().order; i++) {
+      auto n = feedback.sequence.size();
+      feedback.sequence.push_back(
+        feedback.sequence[n - 1] + feedback.sequence[n - 2]);
+      goal.publish_feedback(feedback);
+      co_await ctx.sleep(std::chrono::milliseconds(500));
+      // If a new goal arrives, CancelledException is thrown here
+    }
+
+    Fibonacci::Result result;
+    result.sequence = feedback.sequence;
+    co_return result;
+  });
+```
+
+Preemption is automatic -- the user callback simply uses `co_await` as normal, and `CancelledException` is thrown at the current suspension point when a new goal preempts the current one. Synchronous cleanup can be done in a `catch` block:
+
+```cpp
+[&ctx](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
+  try {
+    // ... main execution ...
+  } catch (const CancelledException &) {
+    stop_motor();  // Cleanup runs before the next goal starts
+    throw;
+  }
+}
+```
+
 ### Action Client
 
 Send a goal and iterate over feedback with `GoalStream`:
@@ -415,6 +454,7 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `create_timer(period)` | `shared_ptr<TimerStream>` | Create a periodic timer stream |
 | `create_service<SrvT>(name, cb)` | `shared_ptr<Service<SrvT>>` | Create a coroutine service server |
 | `create_action_server<ActT>(name, cb)` | `shared_ptr<Server<ActT>>` | Create a coroutine action server |
+| `create_single_goal_action_server<ActT>(ctx, name, cb)` | `shared_ptr<Server<ActT>>` | Single-goal action server with preemption |
 | `wait_for_service(client, timeout)` | *awaitable* `Result<void>` | Wait for a service |
 | `send_request<SrvT>(client, req)` | *awaitable* `Response` | Call a service |
 | `wait_for_action(client, timeout)` | *awaitable* `Result<void>` | Wait for an action server |
