@@ -437,29 +437,20 @@ Task<void> run(CoContext & ctx)
 
 `void` tasks produce `std::monostate` in the variant. Cancellation of the parent task propagates to all child tasks.
 
-### poll / wait_for
+### wait_for / poll_until
 
-`poll` and `wait_for` are composable primitives for polling a condition with a timeout.
+`wait_for` races any task or awaitable against a timeout, returning `Result<T>`. `poll_until` polls a predicate at a fixed interval with a built-in timeout.
 
-- `ctx.poll(pred, interval)` returns a `Task<void>` that loops until `pred()` returns true, sleeping for `interval` between checks.
 - `ctx.wait_for(task, timeout)` races a task against a timeout using `when_any`, returning `Result<T>`.
 - `ctx.wait_for(awaitable, timeout)` also accepts any awaitable directly (e.g., `sleep`, `send_request`), wrapping it in a `Task` automatically.
+- `ctx.poll_until(pred, interval, timeout)` returns `Result<void>` -- polls `pred()` every `interval`, returning `Ok` when true or `Timeout` after `timeout`.
 
 ```cpp
 Task<void> run(CoContext & ctx)
 {
   auto client = ctx.node()->create_client<SetBool>("set_bool");
 
-  // Poll until a condition is met, with a timeout
-  auto result = co_await ctx.wait_for(
-    ctx.poll([&]() { return client->service_is_ready(); }, 100ms), 5s);
-
-  if (result.timeout()) {
-    RCLCPP_ERROR(ctx.node()->get_logger(), "Timed out");
-    co_return;
-  }
-
-  // Pass an awaitable directly -- no need to wrap in a Task
+  // Race an awaitable against a timeout
   auto req = std::make_shared<SetBool::Request>();
   req->data = true;
   auto resp = co_await ctx.wait_for(ctx.send_request<SetBool>(client, req), 5s);
@@ -469,7 +460,7 @@ Task<void> run(CoContext & ctx)
 }
 ```
 
-`wait_for_service` and `wait_for_action` are built on top of these primitives. Cancellation propagates automatically through the entire chain.
+`wait_for_service` and `wait_for_action` are built on top of `poll_until`. Cancellation propagates automatically through the entire chain.
 
 ## Result Type
 
@@ -494,7 +485,7 @@ Most operations return their value directly (e.g., `send_request` returns `Respo
 | `stream->next()` | `optional<T>` | No |
 | `event.wait()` | `void` | No |
 | `mutex.lock()` | `void` | No |
-| `poll` | `void` | No |
+| `poll_until` | `Result<void>` | Yes (timeout) |
 | `wait_for` | `Result<T>` | Yes (timeout) |
 | `wait_for_service` | `Result<void>` | Yes (timeout) |
 | `wait_for_action` | `Result<void>` | Yes (timeout) |
@@ -547,7 +538,7 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `wait_for_action(client, timeout)` | *awaitable* `Result<void>` | Wait for an action server |
 | `send_goal<ActT>(client, goal)` | *awaitable* `Result<shared_ptr<GoalStream>>` | Send an action goal |
 | `sleep(duration)` | *awaitable* `void` | Async sleep |
-| `poll(pred, interval)` | `Task<void>` | Poll until predicate is true |
+| `poll_until(pred, interval, timeout)` | `Task<Result<void>>` | Poll until predicate is true or timeout |
 | `wait_for(awaitable, timeout)` | `Task<Result<T>>` | Race an awaitable against a timeout |
 | `when_all(awaitables...)` | *awaitable* `tuple<Ts...>` | Await all tasks/awaitables concurrently |
 | `when_any(awaitables...)` | *awaitable* `variant<Ts...>` | Race tasks/awaitables, return first result |

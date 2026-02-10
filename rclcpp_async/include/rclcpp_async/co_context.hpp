@@ -152,8 +152,8 @@ public:
   Task<Result<void>> wait_for_service(
     rclcpp::ClientBase::SharedPtr client, std::chrono::nanoseconds timeout = 5s)
   {
-    co_return co_await wait_for(
-      poll([client]() { return client->service_is_ready(); }, 100ms), timeout);
+    co_return co_await poll_until(
+      [client]() { return client->service_is_ready(); }, 100ms, timeout);
   }
 
   template <typename ServiceT>
@@ -174,8 +174,8 @@ public:
   Task<Result<void>> wait_for_action(
     std::shared_ptr<rclcpp_action::Client<ActionT>> client, std::chrono::nanoseconds timeout = 5s)
   {
-    co_return co_await wait_for(
-      poll([client]() { return client->action_server_is_ready(); }, 100ms), timeout);
+    co_return co_await poll_until(
+      [client]() { return client->action_server_is_ready(); }, 100ms, timeout);
   }
 
   template <typename MsgT>
@@ -243,12 +243,17 @@ public:
   }
 
   template <typename Pred>
-  Task<void> poll(Pred pred, std::chrono::nanoseconds interval)
+  Task<Result<void>> poll_until(
+    Pred pred, std::chrono::nanoseconds interval, std::chrono::nanoseconds timeout)
   {
+    if (pred()) co_return Result<void>::Ok();
     auto timer = create_timer(interval);
-    while (!pred()) {
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
       co_await timer->next();
+      if (pred()) co_return Result<void>::Ok();
     }
+    co_return Result<void>::Timeout();
   }
 
   template <typename T>
