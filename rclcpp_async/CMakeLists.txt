@@ -14,6 +14,11 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
+find_package(tf2_ros REQUIRED)
+
+if(tf2_ros_VERSION VERSION_GREATER_EQUAL "0.45.0")
+  add_compile_definitions(TF2_ROS_VERSION_GTE_0_45)
+endif()
 
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE
@@ -23,6 +28,7 @@ target_include_directories(${PROJECT_NAME} INTERFACE
 target_link_libraries(${PROJECT_NAME} INTERFACE
   rclcpp::rclcpp
   rclcpp_action::rclcpp_action
+  tf2_ros::tf2_ros
 )
 target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 
@@ -41,7 +47,7 @@ install(
 )
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(rclcpp rclcpp_action)
+ament_export_dependencies(rclcpp rclcpp_action tf2_ros)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -143,6 +149,9 @@ if(BUILD_TESTING)
 
   ament_add_ros_isolated_gtest(test_poll_wait_for test/test_poll_wait_for.cpp)
   target_link_libraries(test_poll_wait_for ${PROJECT_NAME})
+
+  ament_add_ros_isolated_gtest(test_tf_buffer test/test_tf_buffer.cpp)
+  target_link_libraries(test_tf_buffer ${PROJECT_NAME})
 endif()
 
 ament_package()

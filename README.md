@@ -22,7 +22,7 @@ if (result.ok()) {
 
 - ROS 2 Jazzy (or later)
 - GCC 13+ with C++20 support
-- `rclcpp`, `rclcpp_action`
+- `rclcpp`, `rclcpp_action`, `tf2_ros`
 
 ## Installation
 
@@ -346,6 +346,35 @@ Task<void> critical_section(CoContext & ctx, Mutex & mutex, const std::string & 
 | `mutex.unlock()` | Release the lock, resuming the next waiter |
 | `mutex.is_locked()` | Check the current state |
 
+### TF Lookup (TfBuffer)
+
+`TfBuffer` subscribes to `/tf` and `/tf_static` on a dedicated listener thread and provides `co_await`-able transform lookups.
+
+```cpp
+Task<void> run(CoContext & ctx)
+{
+  TfBuffer tf(ctx);
+
+  // Sync lookup (latest) -- returns nullopt if not yet available
+  auto opt = tf.lookup_transform("map", "base_link");
+  if (opt) {
+    RCLCPP_INFO(ctx.node()->get_logger(), "x=%.2f", opt->transform.translation.x);
+  }
+
+  // Async lookup -- suspends until the transform becomes available
+  auto t = co_await tf.lookup_transform("map", "base_link", rclcpp::Time(0));
+
+  // With timeout
+  auto result = co_await ctx.wait_for(
+    tf.lookup_transform("map", "odom", rclcpp::Time(0)), 5s);
+
+  // Parallel lookups
+  auto [t1, t2] = co_await when_all(
+    tf.lookup_transform("map", "odom", rclcpp::Time(0)),
+    tf.lookup_transform("odom", "base_link", rclcpp::Time(0)));
+}
+```
+
 ### Channel
 
 `Channel<T>` is a thread-safe MPSC (multi-producer, single-consumer) channel for sending values from worker threads to coroutines.
@@ -485,6 +514,7 @@ Most operations return their value directly (e.g., `send_request` returns `Respo
 | `stream->next()` | `optional<T>` | No |
 | `event.wait()` | `void` | No |
 | `mutex.lock()` | `void` | No |
+| `tf.lookup_transform` | `TransformStamped` | No |
 | `poll_until` | `Result<void>` | Yes (timeout) |
 | `wait_for` | `Result<T>` | Yes (timeout) |
 | `wait_for_service` | `Result<void>` | Yes (timeout) |
@@ -544,6 +574,14 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `when_any(awaitables...)` | *awaitable* `variant<Ts...>` | Race tasks/awaitables, return first result |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node::SharedPtr` | Access the underlying node |
+
+### TfBuffer
+
+| Method | Returns | Description |
+|---|---|---|
+| `TfBuffer(ctx)` | -- | Construct with a `CoContext`; starts a listener thread |
+| `lookup_transform(target, source)` | `optional<TransformStamped>` | Sync lookup of latest transform |
+| `lookup_transform(target, source, time)` | *awaitable* `TransformStamped` | Async lookup; suspends until the transform is available |
 
 ## License
 
