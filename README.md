@@ -1,8 +1,20 @@
 # rclcpp_async
 
-A header-only C++20 coroutine library that brings `async/await` to ROS 2.
+A header-only C++20 coroutine library that brings `async/await` to ROS 2, inspired by [icey](https://github.com/iv461/icey).
 
 Write asynchronous ROS 2 code that reads like sequential code -- no callback nesting, no deadlocks on single-threaded executors.
+
+```cpp
+auto result = co_await ctx.wait_for(
+  when_all(
+    ctx.send_request<Srv1>(client1, req1),
+    ctx.send_request<Srv2>(client2, req2)),
+  5s);
+
+if (result.ok()) {
+  auto [resp1, resp2] = *result.value;
+}
+```
 
 ## Requirements
 
