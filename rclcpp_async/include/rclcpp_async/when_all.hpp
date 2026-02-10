@@ -200,4 +200,11 @@ WhenAllAwaiter<Ts...> when_all(Task<Ts>... tasks)
     std::move(state), std::move(results), std::move(joins), child_sources, {}, {}};
 }
 
+template <typename... Awaitables>
+auto when_all(Awaitables... awaitables)
+  requires(!(is_task_v<Awaitables> && ...))
+{
+  return when_all(as_task(std::move(awaitables))...);
+}
+
 }  // namespace rclcpp_async

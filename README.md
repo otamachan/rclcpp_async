@@ -361,7 +361,7 @@ auto task = ctx.create_task([&]() -> Task<void> {
 
 ### when_all
 
-`when_all` concurrently awaits multiple tasks and returns all results as a `std::tuple`.
+`when_all` concurrently awaits multiple tasks and returns all results as a `std::tuple`. It accepts `Task<T>` objects as well as arbitrary awaitables (anything with `await_ready`/`await_suspend`/`await_resume`), which are automatically wrapped into tasks.
 
 ```cpp
 Task<int> fetch_a(CoContext & ctx) {
@@ -381,6 +381,12 @@ Task<void> run(CoContext & ctx)
     ctx.create_task(fetch_b(ctx)));
   // a == 42, b == "hello"
   // Total time ~2s (parallel), not 3s (sequential)
+
+  // Awaitables can be passed directly -- no need to wrap in a Task
+  auto req = std::make_shared<SetBool::Request>();
+  auto [resp, _] = co_await when_all(
+    ctx.send_request<SetBool>(client, req),
+    ctx.sleep(std::chrono::seconds(1)));
 }
 ```
 
@@ -388,7 +394,7 @@ Task<void> run(CoContext & ctx)
 
 ### when_any
 
-`when_any` races multiple tasks concurrently and returns the result of whichever finishes first, wrapped in a `std::variant`. The remaining tasks are cancelled automatically.
+`when_any` races multiple tasks concurrently and returns the result of whichever finishes first, wrapped in a `std::variant`. The remaining tasks are cancelled automatically. Like `when_all`, it accepts both `Task<T>` objects and arbitrary awaitables.
 
 ```cpp
 Task<int> fast(CoContext & ctx) {
@@ -529,8 +535,8 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `sleep(duration)` | *awaitable* `void` | Async sleep |
 | `poll(pred, interval)` | `Task<void>` | Poll until predicate is true |
 | `wait_for(awaitable, timeout)` | `Task<Result<T>>` | Race an awaitable against a timeout |
-| `when_all(tasks...)` | *awaitable* `tuple<Ts...>` | Await all tasks concurrently |
-| `when_any(tasks...)` | *awaitable* `variant<Ts...>` | Race tasks, return first result |
+| `when_all(awaitables...)` | *awaitable* `tuple<Ts...>` | Await all tasks/awaitables concurrently |
+| `when_any(awaitables...)` | *awaitable* `variant<Ts...>` | Race tasks/awaitables, return first result |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node::SharedPtr` | Access the underlying node |
 
