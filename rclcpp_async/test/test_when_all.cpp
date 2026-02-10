@@ -26,10 +26,6 @@ using namespace rclcpp_async;  // NOLINT(build/namespaces)
 
 using StopCb = std::stop_callback<std::function<void()>>;
 
-// ============================================================
-// Helper coroutines
-// ============================================================
-
 Task<int> returns_int(int v) { co_return v; }
 
 Task<std::string> returns_string(std::string s) { co_return s; }
@@ -42,10 +38,6 @@ Task<int> adds_two_tasks()
   int b = co_await returns_int(20);
   co_return a + b;
 }
-
-// ============================================================
-// TwoIntTasks
-// ============================================================
 
 Task<std::tuple<int, int>> two_int_tasks()
 {
@@ -62,10 +54,6 @@ TEST(WhenAll, TwoIntTasks)
   EXPECT_EQ(b, 20);
 }
 
-// ============================================================
-// MixedVoidAndValue
-// ============================================================
-
 Task<std::tuple<int, std::monostate>> mixed_void_and_value()
 {
   co_return co_await when_all(returns_int(42), does_nothing());
@@ -80,10 +68,6 @@ TEST(WhenAll, MixedVoidAndValue)
   EXPECT_EQ(a, 42);
   EXPECT_EQ(b, std::monostate{});
 }
-
-// ============================================================
-// ThreeTasks
-// ============================================================
 
 Task<std::tuple<int, std::string, int>> three_tasks()
 {
@@ -101,10 +85,6 @@ TEST(WhenAll, ThreeTasks)
   EXPECT_EQ(c, 3);
 }
 
-// ============================================================
-// SynchronousCompletion
-// ============================================================
-
 TEST(WhenAll, SynchronousCompletion)
 {
   // All tasks complete without any async suspension
@@ -115,10 +95,6 @@ TEST(WhenAll, SynchronousCompletion)
   EXPECT_EQ(a, 10);
   EXPECT_EQ(b, 20);
 }
-
-// ============================================================
-// CancelPropagation
-// ============================================================
 
 Task<std::tuple<int, int>> cancel_propagation_coro(bool * child1_cancelled, bool * child2_cancelled)
 {
@@ -154,10 +130,6 @@ TEST(WhenAll, CancelPropagation)
   EXPECT_TRUE(child2_cancelled);
 }
 
-// ============================================================
-// AlreadyCancelled
-// ============================================================
-
 TEST(WhenAll, AlreadyCancelled)
 {
   bool child1_cancelled = false;
@@ -172,10 +144,6 @@ TEST(WhenAll, AlreadyCancelled)
   EXPECT_TRUE(child2_cancelled);
 }
 
-// ============================================================
-// SingleTask
-// ============================================================
-
 Task<std::tuple<int>> single_task() { co_return co_await when_all(returns_int(99)); }
 
 TEST(WhenAll, SingleTask)
@@ -186,10 +154,6 @@ TEST(WhenAll, SingleTask)
   auto [a] = *task.handle.promise().value;
   EXPECT_EQ(a, 99);
 }
-
-// ============================================================
-// Chained tasks (tasks that co_await other tasks internally)
-// ============================================================
 
 Task<std::tuple<int, int>> chained_inner_tasks()
 {

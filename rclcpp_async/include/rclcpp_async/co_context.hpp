@@ -309,10 +309,6 @@ inline void register_cancel(
   });
 }
 
-// ============================================================
-// Awaiter await_suspend implementations (need full CoContext)
-// ============================================================
-
 template <typename ReadyChecker>
 void WaitForReadyAwaiter<ReadyChecker>::await_suspend(std::coroutine_handle<> h)
 {
@@ -491,10 +487,6 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
     });
 }
 
-// ============================================================
-// Event / Mutex implementations (need full CoContext)
-// ============================================================
-
 inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   active = std::make_shared<bool>(true);
@@ -538,10 +530,6 @@ inline void Mutex::unlock()
   locked_ = false;
 }
 
-// ============================================================
-// TimerStream await_suspend (need full CoContext)
-// ============================================================
-
 inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   stream.waiter_ = h;
@@ -552,10 +540,6 @@ inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
       cancelled = true;
     });
 }
-
-// ============================================================
-// Channel implementations (need full CoContext)
-// ============================================================
 
 template <typename T>
 bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
