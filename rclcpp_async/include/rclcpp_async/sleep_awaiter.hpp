@@ -17,6 +17,7 @@
 #include <chrono>
 #include <coroutine>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <rclcpp/rclcpp.hpp>
 #include <stop_token>
@@ -37,7 +38,7 @@ struct SleepAwaiter
   std::chrono::nanoseconds duration;
   rclcpp::TimerBase::SharedPtr timer;
   std::stop_token token;
-  std::optional<StopCb> cancel_cb_;
+  std::unique_ptr<StopCb> cancel_cb_;
   bool cancelled = false;
   bool done = false;
 

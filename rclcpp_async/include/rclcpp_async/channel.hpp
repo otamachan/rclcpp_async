@@ -16,6 +16,7 @@
 
 #include <coroutine>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -50,7 +51,7 @@ public:
   {
     Channel & ch;
     std::stop_token token;
-    std::optional<StopCb> cancel_cb_;
+    std::unique_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
 
     void set_token(std::stop_token t) { token = std::move(t); }

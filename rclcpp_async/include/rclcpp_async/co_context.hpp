@@ -28,6 +28,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <stop_token>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -266,6 +267,21 @@ public:
     }
   }
 
+  template <typename Awaitable>
+  auto wait_for(Awaitable awaitable, std::chrono::nanoseconds timeout)
+    -> Task<Result<std::decay_t<decltype(awaitable.await_resume())>>>
+  {
+    using T = std::decay_t<decltype(awaitable.await_resume())>;
+    if constexpr (std::is_void_v<T>) {
+      return wait_for(
+        [](Awaitable a) -> Task<void> { co_await std::move(a); }(std::move(awaitable)), timeout);
+    } else {
+      return wait_for<T>(
+        [](Awaitable a) -> Task<T> { co_return co_await std::move(a); }(std::move(awaitable)),
+        timeout);
+    }
+  }
+
   template <typename ActionT, typename CallbackT, typename GoalCbT, typename CancelCbT>
   typename rclcpp_action::Server<ActionT>::SharedPtr create_action_server(
     const std::string & name, CallbackT && callback, GoalCbT && goal_callback,
@@ -316,13 +332,13 @@ public:
 
 template <typename DonePred, typename CancelAction>
 inline void register_cancel(
-  std::optional<StopCb> & out, std::stop_token token, CoContext & ctx, std::coroutine_handle<> h,
+  std::unique_ptr<StopCb> & out, std::stop_token token, CoContext & ctx, std::coroutine_handle<> h,
   DonePred is_done, CancelAction action)
 {
   if (!token.stop_possible()) {
     return;
   }
-  out.emplace(token, [&ctx, h, is_done, action]() {
+  out = std::unique_ptr<StopCb>(new StopCb(token, [&ctx, h, is_done, action]() {
     ctx.post([&ctx, h, is_done, action]() {
       if (is_done()) {
         return;
@@ -330,7 +346,7 @@ inline void register_cancel(
       action();
       ctx.resume(h);
     });
-  });
+  }));
 }
 
 template <typename ServiceT>
@@ -543,7 +559,7 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
     ch.waiter_ = h;
   }  // release ch.mutex_ before stop_callback to avoid deadlock
   if (token.stop_possible()) {
-    cancel_cb_.emplace(token, [this, h]() {
+    cancel_cb_ = std::unique_ptr<StopCb>(new StopCb(token, [this, h]() {
       std::coroutine_handle<> w;
       {
         std::lock_guard lock(ch.mutex_);
@@ -557,7 +573,7 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
         cancelled = true;
         ch.ctx_.post([w]() { w.resume(); });
       }
-    });
+    }));
   }
   return true;
 }
