@@ -386,6 +386,37 @@ Task<void> run(CoContext & ctx)
 
 `void` tasks return `std::monostate` in the tuple. Cancellation of the parent task propagates to all child tasks.
 
+### when_any
+
+`when_any` races multiple tasks concurrently and returns the result of whichever finishes first, wrapped in a `std::variant`. The remaining tasks are cancelled automatically.
+
+```cpp
+Task<int> fast(CoContext & ctx) {
+  co_await ctx.sleep(std::chrono::seconds(1));
+  co_return 42;
+}
+
+Task<std::string> slow(CoContext & ctx) {
+  co_await ctx.sleep(std::chrono::seconds(10));
+  co_return std::string("too slow");
+}
+
+Task<void> run(CoContext & ctx)
+{
+  auto result = co_await when_any(
+    ctx.create_task(fast(ctx)),
+    ctx.create_task(slow(ctx)));
+  // result is std::variant<int, std::string>
+
+  if (result.index() == 0) {
+    int value = std::get<0>(result);  // 42
+  }
+  // slow() is cancelled automatically
+}
+```
+
+`void` tasks produce `std::monostate` in the variant. Cancellation of the parent task propagates to all child tasks.
+
 ## Result Type
 
 Operations that can timeout or fail return `Result<T>`:
@@ -460,6 +491,8 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `wait_for_action(client, timeout)` | *awaitable* `Result<void>` | Wait for an action server |
 | `send_goal<ActT>(client, goal)` | *awaitable* `Result<shared_ptr<GoalStream>>` | Send an action goal |
 | `sleep(duration)` | *awaitable* `void` | Async sleep |
+| `when_all(tasks...)` | *awaitable* `tuple<Ts...>` | Await all tasks concurrently |
+| `when_any(tasks...)` | *awaitable* `variant<Ts...>` | Race tasks, return first result |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node::SharedPtr` | Access the underlying node |
 

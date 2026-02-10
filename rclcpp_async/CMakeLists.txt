@@ -93,6 +93,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_when_all test/test_when_all.cpp)
   target_link_libraries(test_when_all ${PROJECT_NAME})
 
+  ament_add_gtest(test_when_any test/test_when_any.cpp)
+  target_link_libraries(test_when_any ${PROJECT_NAME})
+
   # Level 2: ROS2 integration tests (isolated domain ID for parallel safety)
   ament_add_ros_isolated_gtest(test_sleep test/test_sleep.cpp)
   target_link_libraries(test_sleep ${PROJECT_NAME})

@@ -27,3 +27,4 @@
 #include "rclcpp_async/timer_stream.hpp"
 #include "rclcpp_async/topic_stream.hpp"
 #include "rclcpp_async/when_all.hpp"
+#include "rclcpp_async/when_any.hpp"
