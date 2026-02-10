@@ -107,7 +107,7 @@ RaceJoinTask race_join_coro(
     if constexpr (std::is_void_v<T>) {
       co_await task;
       if (state->winner.compare_exchange_strong(expected, static_cast<int>(I))) {
-        *result = std::monostate{};
+        result->template emplace<I>(std::monostate{});
         for (std::size_t j = 0; j < N; ++j) {
           if (j != I) {
             (*sources)[j]->request_stop();

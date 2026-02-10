@@ -16,6 +16,8 @@
 
 #include <coroutine>
 #include <exception>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <stop_token>
 #include <utility>
@@ -79,14 +81,25 @@ struct Task
     void unhandled_exception() { exception = std::current_exception(); }
   };
 
+  using StopCb = std::stop_callback<std::function<void()>>;
+
   std::coroutine_handle<promise_type> handle;
   bool started_ = false;
+  std::stop_token parent_token_;
+  std::unique_ptr<StopCb> parent_cancel_cb_;
+
+  void set_token(std::stop_token t) { parent_token_ = std::move(t); }
 
   // co_await Task (coroutine chaining)
   bool await_ready() { return handle.done(); }
   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
   {
     handle.promise().continuation = h;
+    if (parent_token_.stop_possible()) {
+      auto child = handle;
+      parent_cancel_cb_ = std::unique_ptr<StopCb>(
+        new StopCb(parent_token_, [child]() { child.promise().stop_source.request_stop(); }));
+    }
     if (started_) {
       return std::noop_coroutine();
     }
@@ -95,6 +108,7 @@ struct Task
   }
   T await_resume()
   {
+    parent_cancel_cb_.reset();
     if (handle.promise().exception) {
       std::rethrow_exception(handle.promise().exception);
     }
@@ -109,7 +123,11 @@ struct Task
       handle.destroy();
     }
   }
-  Task(Task && o) noexcept : handle(o.handle), started_(o.started_) { o.handle = nullptr; }
+  Task(Task && o) noexcept
+  : handle(o.handle), started_(o.started_), parent_cancel_cb_(std::move(o.parent_cancel_cb_))
+  {
+    o.handle = nullptr;
+  }
   Task & operator=(Task &&) = delete;
   Task(const Task &) = delete;
 
@@ -167,13 +185,24 @@ struct Task<void>
     void unhandled_exception() { exception = std::current_exception(); }
   };
 
+  using StopCb = std::stop_callback<std::function<void()>>;
+
   std::coroutine_handle<promise_type> handle;
   bool started_ = false;
+  std::stop_token parent_token_;
+  std::unique_ptr<StopCb> parent_cancel_cb_;
+
+  void set_token(std::stop_token t) { parent_token_ = std::move(t); }
 
   bool await_ready() { return handle.done(); }
   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
   {
     handle.promise().continuation = h;
+    if (parent_token_.stop_possible()) {
+      auto child = handle;
+      parent_cancel_cb_ = std::unique_ptr<StopCb>(
+        new StopCb(parent_token_, [child]() { child.promise().stop_source.request_stop(); }));
+    }
     if (started_) {
       return std::noop_coroutine();
     }
@@ -182,6 +211,7 @@ struct Task<void>
   }
   void await_resume()
   {
+    parent_cancel_cb_.reset();
     if (handle.promise().exception) {
       std::rethrow_exception(handle.promise().exception);
     }
@@ -195,7 +225,11 @@ struct Task<void>
       handle.destroy();
     }
   }
-  Task(Task && o) noexcept : handle(o.handle), started_(o.started_) { o.handle = nullptr; }
+  Task(Task && o) noexcept
+  : handle(o.handle), started_(o.started_), parent_cancel_cb_(std::move(o.parent_cancel_cb_))
+  {
+    o.handle = nullptr;
+  }
   Task & operator=(Task &&) = delete;
   Task(const Task &) = delete;
 

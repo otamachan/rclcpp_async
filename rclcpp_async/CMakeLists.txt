@@ -140,6 +140,9 @@ if(BUILD_TESTING)
     test/test_single_goal_action_server.cpp)
   target_link_libraries(test_single_goal_action_server
     ${PROJECT_NAME} ${example_interfaces_TARGETS})
+
+  ament_add_ros_isolated_gtest(test_poll_wait_for test/test_poll_wait_for.cpp)
+  target_link_libraries(test_poll_wait_for ${PROJECT_NAME})
 endif()
 
 ament_package()

@@ -43,7 +43,7 @@
 #include "rclcpp_async/task.hpp"
 #include "rclcpp_async/timer_stream.hpp"
 #include "rclcpp_async/topic_stream.hpp"
-#include "rclcpp_async/wait_for_ready_awaiter.hpp"
+#include "rclcpp_async/when_any.hpp"
 
 namespace rclcpp_async
 {
@@ -148,11 +148,11 @@ public:
 
   // --- Awaiter factory methods ---
 
-  WaitForServiceAwaiter wait_for_service(
+  Task<Result<void>> wait_for_service(
     rclcpp::ClientBase::SharedPtr client, std::chrono::nanoseconds timeout = 5s)
   {
-    return WaitForServiceAwaiter{
-      *this, ServiceReadyChecker{std::move(client)}, timeout, nullptr, nullptr, {}, {}, {}, false};
+    co_return co_await wait_for(
+      poll([client]() { return client->service_is_ready(); }, 100ms), timeout);
   }
 
   template <typename ServiceT>
@@ -170,12 +170,11 @@ public:
   }
 
   template <typename ActionT>
-  WaitForActionAwaiter<ActionT> wait_for_action(
+  Task<Result<void>> wait_for_action(
     std::shared_ptr<rclcpp_action::Client<ActionT>> client, std::chrono::nanoseconds timeout = 5s)
   {
-    return WaitForActionAwaiter<ActionT>{
-      *this, ActionReadyChecker<ActionT>{std::move(client)}, timeout, nullptr, nullptr, {}, {}, {},
-      false};
+    co_return co_await wait_for(
+      poll([client]() { return client->action_server_is_ready(); }, 100ms), timeout);
   }
 
   template <typename MsgT>
@@ -240,6 +239,31 @@ public:
       }
     });
     return stream;
+  }
+
+  template <typename Pred>
+  Task<void> poll(Pred pred, std::chrono::nanoseconds interval)
+  {
+    auto timer = create_timer(interval);
+    while (!pred()) {
+      co_await timer->next();
+    }
+  }
+
+  template <typename T>
+  Task<Result<T>> wait_for(Task<T> task, std::chrono::nanoseconds timeout)
+  {
+    auto timeout_task = [this, timeout]() -> Task<void> { co_await sleep(timeout); };
+    auto result = co_await when_any(std::move(task), timeout_task());
+    if (result.index() == 0) {
+      if constexpr (std::is_void_v<T>) {
+        co_return Result<void>::Ok();
+      } else {
+        co_return Result<T>::Ok(std::get<0>(result));
+      }
+    } else {
+      co_return Result<T>::Timeout();
+    }
   }
 
   template <typename ActionT, typename CallbackT, typename GoalCbT, typename CancelCbT>
@@ -307,39 +331,6 @@ inline void register_cancel(
       ctx.resume(h);
     });
   });
-}
-
-template <typename ReadyChecker>
-void WaitForReadyAwaiter<ReadyChecker>::await_suspend(std::coroutine_handle<> h)
-{
-  auto finish = [this, h](Result<void> r) {
-    if (done) {
-      return;
-    }
-    done = true;
-    poll_timer->cancel();
-    deadline_timer->cancel();
-    result = std::move(r);
-    ctx.resume(h);
-  };
-
-  poll_timer = ctx.node()->create_wall_timer(100ms, [this, finish]() {
-    if (checker.is_ready()) {
-      finish(Result<void>::Ok());
-    }
-  });
-
-  deadline_timer =
-    ctx.node()->create_wall_timer(timeout, [finish]() { finish(Result<void>::Timeout()); });
-
-  register_cancel(
-    cancel_cb_, token, ctx, h, [this]() { return done; },
-    [this]() {
-      done = true;
-      poll_timer->cancel();
-      deadline_timer->cancel();
-      cancelled = true;
-    });
 }
 
 template <typename ServiceT>
