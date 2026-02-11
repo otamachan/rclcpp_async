@@ -118,6 +118,9 @@ struct Task
 
   void cancel() { handle.promise().stop_source.request_stop(); }
 
+  explicit operator bool() const noexcept { return handle != nullptr; }
+  bool done() const noexcept { return handle && handle.done(); }
+
   ~Task()
   {
     if (handle) {
@@ -219,6 +222,9 @@ struct Task<void>
   }
 
   void cancel() { handle.promise().stop_source.request_stop(); }
+
+  explicit operator bool() const noexcept { return handle != nullptr; }
+  bool done() const noexcept { return handle && handle.done(); }
 
   ~Task()
   {

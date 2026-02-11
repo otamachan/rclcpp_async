@@ -554,6 +554,25 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node::SharedPtr` | Access the underlying node |
 
+### Task
+
+| Method | Returns | Description |
+|---|---|---|
+| `operator bool()` | `bool` | `true` if the task holds a valid coroutine (not moved-from) |
+| `done()` | `bool` | `true` if the coroutine has completed (`false` for null tasks) |
+| `cancel()` | `void` | Request cancellation via `CancelledException` |
+
+```cpp
+auto task = ctx.create_task(run(ctx));
+
+if (task) {       // true -- valid coroutine
+  // ...
+}
+if (task.done()) {
+  // coroutine has finished
+}
+```
+
 ## License
 
 Apache-2.0
