@@ -36,7 +36,7 @@ protected:
   void SetUp() override
   {
     node_ = std::make_shared<rclcpp::Node>("test_goal_node");
-    ctx_ = std::make_unique<CoContext>(node_);
+    ctx_ = std::make_unique<CoContext>(*node_);
     executor_.add_node(node_);
     action_client_ = rclcpp_action::create_client<Fibonacci>(node_, "test_goal_action");
   }

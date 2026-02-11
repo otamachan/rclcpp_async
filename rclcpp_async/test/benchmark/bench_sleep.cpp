@@ -92,7 +92,7 @@ int main(int argc, char ** argv)
   rclcpp::init(argc, argv);
 
   auto node = std::make_shared<rclcpp::Node>("bench_sleep_node");
-  auto ctx = std::make_unique<CoContext>(node);
+  auto ctx = std::make_unique<CoContext>(*node);
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node);
 

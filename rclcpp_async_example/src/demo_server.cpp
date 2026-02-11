@@ -30,7 +30,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("demo_server");
-  rclcpp_async::CoContext ctx(node);
+  rclcpp_async::CoContext ctx(*node);
 
   // Service: set_bool (coroutine)
   auto service = ctx.create_service<SetBool>(
@@ -39,7 +39,7 @@ int main(int argc, char * argv[])
       resp.success = req->data;
       resp.message = req->data ? "enabled" : "disabled";
       RCLCPP_INFO(
-        ctx.node()->get_logger(), "Request: %s -> %s", req->data ? "true" : "false",
+        ctx.node().get_logger(), "Request: %s -> %s", req->data ? "true" : "false",
         resp.message.c_str());
       co_return resp;
     });
@@ -49,7 +49,7 @@ int main(int argc, char * argv[])
   auto action_server = ctx.create_action_server<Fibonacci>(
     "fibonacci",
     [&ctx](rclcpp_async::GoalContext<Fibonacci> goal) -> rclcpp_async::Task<Fibonacci::Result> {
-      auto logger = ctx.node()->get_logger();
+      auto logger = ctx.node().get_logger();
       RCLCPP_INFO(logger, "Received goal: order=%d", goal.goal().order);
 
       Fibonacci::Feedback feedback;
@@ -75,30 +75,30 @@ int main(int argc, char * argv[])
 
   // Publisher: topic_a (1s interval, timer stream)
   auto task_a = ctx.create_task([&ctx]() -> rclcpp_async::Task<void> {
-    auto n = ctx.node();
-    auto pub = n->create_publisher<std_msgs::msg::String>("topic_a", 10);
+    auto & n = ctx.node();
+    auto pub = n.create_publisher<std_msgs::msg::String>("topic_a", 10);
     auto timer = ctx.create_timer(1s);
     int count = 0;
     while (true) {
       co_await timer->next();
       auto msg = std_msgs::msg::String();
       msg.data = "Hello from A: " + std::to_string(count++);
-      RCLCPP_INFO(n->get_logger(), "Publishing to topic_a: '%s'", msg.data.c_str());
+      RCLCPP_INFO(n.get_logger(), "Publishing to topic_a: '%s'", msg.data.c_str());
       pub->publish(msg);
     }
   });
 
   // Publisher: topic_b (700ms interval, timer stream)
   auto task_b = ctx.create_task([&ctx]() -> rclcpp_async::Task<void> {
-    auto n = ctx.node();
-    auto pub = n->create_publisher<std_msgs::msg::String>("topic_b", 10);
+    auto & n = ctx.node();
+    auto pub = n.create_publisher<std_msgs::msg::String>("topic_b", 10);
     auto timer = ctx.create_timer(700ms);
     int count = 0;
     while (true) {
       co_await timer->next();
       auto msg = std_msgs::msg::String();
       msg.data = "Hello from B: " + std::to_string(count++);
-      RCLCPP_INFO(n->get_logger(), "Publishing to topic_b: '%s'", msg.data.c_str());
+      RCLCPP_INFO(n.get_logger(), "Publishing to topic_b: '%s'", msg.data.c_str());
       pub->publish(msg);
     }
   });

@@ -18,6 +18,7 @@ find_package(rclcpp_async REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(example_interfaces REQUIRED)
+find_package(rclcpp_components REQUIRED)
 
 add_executable(demo_server src/demo_server.cpp)
 target_link_libraries(demo_server rclcpp_async::rclcpp_async
@@ -36,8 +37,22 @@ add_executable(nested_demo src/nested_demo.cpp)
 target_link_libraries(nested_demo rclcpp_async::rclcpp_async
   ${std_srvs_TARGETS} ${example_interfaces_TARGETS})
 
+add_library(component_demo SHARED src/component_demo.cpp)
+target_link_libraries(component_demo rclcpp_async::rclcpp_async
+  ${std_msgs_TARGETS} ${std_srvs_TARGETS})
+ament_target_dependencies(component_demo rclcpp_components)
+rclcpp_components_register_node(component_demo
+  PLUGIN "rclcpp_async_example::ComponentDemo"
+  EXECUTABLE component_demo_node)
+
 install(TARGETS demo_server subscriber service_client action_client nested_demo
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS component_demo
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
 install(DIRECTORY launch/

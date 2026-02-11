@@ -116,14 +116,17 @@ public:
 class CoContext
 {
   std::shared_ptr<DrainWaitable> drain_;
-  rclcpp::Node::SharedPtr node_;
+  rclcpp::Node & node_;
 
 public:
-  explicit CoContext(rclcpp::Node::SharedPtr node) : node_(std::move(node))
+  explicit CoContext(rclcpp::Node & node) : node_(node)
   {
     drain_ = std::make_shared<DrainWaitable>();
-    node_->get_node_waitables_interface()->add_waitable(drain_, nullptr);
+    node_.get_node_waitables_interface()->add_waitable(drain_, nullptr);
   }
+
+  CoContext(const CoContext &) = delete;
+  CoContext & operator=(const CoContext &) = delete;
 
   // Post a callback to be executed on the executor thread (thread-safe).
   void post(std::function<void()> fn) { drain_->post(std::move(fn)); }
@@ -131,7 +134,7 @@ public:
   // Resume a coroutine directly. Call only from the executor thread.
   void resume(std::coroutine_handle<> h) { h.resume(); }
 
-  rclcpp::Node::SharedPtr node() { return node_; }
+  rclcpp::Node & node() { return node_; }
 
   template <typename T>
   [[nodiscard]] Task<T> create_task(Task<T> task)
@@ -182,7 +185,7 @@ public:
   std::shared_ptr<TopicStream<MsgT>> subscribe(const std::string & topic, const rclcpp::QoS & qos)
   {
     auto stream = std::make_shared<TopicStream<MsgT>>(*this);
-    stream->sub_ = node_->template create_subscription<MsgT>(
+    stream->sub_ = node_.template create_subscription<MsgT>(
       topic, qos, [s = stream](typename MsgT::SharedPtr msg) {
         if (s->closed_) {
           return;
@@ -224,13 +227,13 @@ public:
           srv->send_response(*req_id, response);
         }(cb, std::move(service_handle), std::move(request_id), std::move(request));
       };
-    return node_->template create_service<ServiceT>(name, std::move(handler));
+    return node_.template create_service<ServiceT>(name, std::move(handler));
   }
 
   std::shared_ptr<TimerStream> create_timer(std::chrono::nanoseconds period)
   {
     auto stream = std::make_shared<TimerStream>(*this);
-    stream->timer_ = node_->create_wall_timer(period, [s = stream, this]() {
+    stream->timer_ = node_.create_wall_timer(period, [s = stream, this]() {
       if (s->waiter_) {
         auto w = s->waiter_;
         s->waiter_ = nullptr;
@@ -286,7 +289,9 @@ public:
     using GoalHandleT = rclcpp_action::ServerGoalHandle<ActionT>;
 
     return rclcpp_action::create_server<ActionT>(
-      node_, name, std::forward<GoalCbT>(goal_callback), std::forward<CancelCbT>(cancel_callback),
+      node_.get_node_base_interface(), node_.get_node_clock_interface(),
+      node_.get_node_logging_interface(), node_.get_node_waitables_interface(), name,
+      std::forward<GoalCbT>(goal_callback), std::forward<CancelCbT>(cancel_callback),
       [cb = std::forward<CallbackT>(callback)](
         const std::shared_ptr<GoalHandleT> goal_handle) mutable {
         [](CallbackT & cb, std::shared_ptr<GoalHandleT> gh) -> SpawnedTask {
@@ -377,7 +382,7 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
     ctx.resume(h);
   };
 
-  timer = ctx.node()->create_wall_timer(duration, [finish]() { finish(); });
+  timer = ctx.node().create_wall_timer(duration, [finish]() { finish(); });
 
   register_cancel(
     cancel_cb_, token, ctx, h, [this]() { return done; },

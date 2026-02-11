@@ -51,14 +51,14 @@ colcon build --packages-select rclcpp_async
 rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
 {
   co_await ctx.sleep(std::chrono::seconds(1));
-  RCLCPP_INFO(ctx.node()->get_logger(), "Hello from coroutine!");
+  RCLCPP_INFO(ctx.node().get_logger(), "Hello from coroutine!");
 }
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("hello");
-  rclcpp_async::CoContext ctx(node);
+  rclcpp_async::CoContext ctx(*node);
 
   auto task = ctx.create_task(run(ctx));
 
@@ -110,7 +110,7 @@ Task<void> listen(CoContext & ctx, std::string topic)
     if (!msg.has_value()) {
       break;
     }
-    RCLCPP_INFO(ctx.node()->get_logger(), "Heard: %s", (*msg)->data.c_str());
+    RCLCPP_INFO(ctx.node().get_logger(), "Heard: %s", (*msg)->data.c_str());
   }
 }
 ```
@@ -133,12 +133,12 @@ using SetBool = std_srvs::srv::SetBool;
 
 Task<void> call_service(CoContext & ctx)
 {
-  auto client = ctx.node()->create_client<SetBool>("set_bool");
+  auto client = ctx.node().create_client<SetBool>("set_bool");
 
   // Wait for the service to become available
   auto wait_result = co_await ctx.wait_for_service(client, std::chrono::seconds(10));
   if (!wait_result.ok()) {
-    RCLCPP_ERROR(ctx.node()->get_logger(), "Service not available");
+    RCLCPP_ERROR(ctx.node().get_logger(), "Service not available");
     co_return;
   }
 
@@ -147,7 +147,7 @@ Task<void> call_service(CoContext & ctx)
   req->data = true;
 
   auto resp = co_await ctx.send_request<SetBool>(client, req);
-  RCLCPP_INFO(ctx.node()->get_logger(), "Response: %s", resp->message.c_str());
+  RCLCPP_INFO(ctx.node().get_logger(), "Response: %s", resp->message.c_str());
 }
 ```
 
@@ -163,7 +163,7 @@ Task<void> tick(CoContext & ctx)
 
   while (true) {
     co_await timer->next();
-    RCLCPP_INFO(ctx.node()->get_logger(), "Tick %d", count++);
+    RCLCPP_INFO(ctx.node().get_logger(), "Tick %d", count++);
   }
 }
 ```
@@ -273,7 +273,7 @@ Send a goal and iterate over feedback with `GoalStream`:
 ```cpp
 Task<void> send_action(CoContext & ctx)
 {
-  auto client = rclcpp_action::create_client<Fibonacci>(ctx.node(), "fibonacci");
+  auto client = rclcpp_action::create_client<Fibonacci>(&ctx.node(), "fibonacci");
 
   auto wait_result = co_await ctx.wait_for_action(client, std::chrono::seconds(10));
   if (!wait_result.ok()) { co_return; }
@@ -293,13 +293,13 @@ Task<void> send_action(CoContext & ctx)
       break;
     }
     auto & seq = (*feedback)->sequence;
-    RCLCPP_INFO(ctx.node()->get_logger(), "Feedback: last=%d", seq.back());
+    RCLCPP_INFO(ctx.node().get_logger(), "Feedback: last=%d", seq.back());
   }
 
   // Get final result
   auto result = stream->result();
   auto & seq = result.result->sequence;
-  RCLCPP_INFO(ctx.node()->get_logger(), "Result: last=%d", seq.back());
+  RCLCPP_INFO(ctx.node().get_logger(), "Result: last=%d", seq.back());
 }
 ```
 
@@ -313,7 +313,7 @@ rclcpp_async::Event event(ctx);
 // Task 1: wait for the event
 auto waiter = ctx.create_task([&]() -> Task<void> {
   co_await event.wait();
-  RCLCPP_INFO(ctx.node()->get_logger(), "Event received!");
+  RCLCPP_INFO(ctx.node().get_logger(), "Event received!");
 });
 
 // Task 2: signal the event
@@ -340,7 +340,7 @@ rclcpp_async::Mutex mutex(ctx);
 Task<void> critical_section(CoContext & ctx, Mutex & mutex, const std::string & name)
 {
   co_await mutex.lock();
-  RCLCPP_INFO(ctx.node()->get_logger(), "%s: acquired lock", name.c_str());
+  RCLCPP_INFO(ctx.node().get_logger(), "%s: acquired lock", name.c_str());
   co_await ctx.sleep(std::chrono::seconds(1));
   mutex.unlock();
 }
@@ -364,7 +364,7 @@ Task<void> run(CoContext & ctx)
   // Sync lookup (latest) -- returns nullopt if not yet available
   auto opt = tf.lookup_transform("map", "base_link");
   if (opt) {
-    RCLCPP_INFO(ctx.node()->get_logger(), "x=%.2f", opt->transform.translation.x);
+    RCLCPP_INFO(ctx.node().get_logger(), "x=%.2f", opt->transform.translation.x);
   }
 
   // Async lookup -- suspends until the transform becomes available
@@ -403,7 +403,7 @@ auto task = ctx.create_task([&]() -> Task<void> {
     if (!val.has_value()) {
       break;                       // Channel closed
     }
-    RCLCPP_INFO(ctx.node()->get_logger(), "Received: %d", *val);
+    RCLCPP_INFO(ctx.node().get_logger(), "Received: %d", *val);
   }
 });
 ```
@@ -483,14 +483,14 @@ Task<void> run(CoContext & ctx)
 ```cpp
 Task<void> run(CoContext & ctx)
 {
-  auto client = ctx.node()->create_client<SetBool>("set_bool");
+  auto client = ctx.node().create_client<SetBool>("set_bool");
 
   // Race an awaitable against a timeout
   auto req = std::make_shared<SetBool::Request>();
   req->data = true;
   auto resp = co_await ctx.wait_for(ctx.send_request<SetBool>(client, req), 5s);
   if (resp.ok()) {
-    RCLCPP_INFO(ctx.node()->get_logger(), "Response: %s", resp.value->message.c_str());
+    RCLCPP_INFO(ctx.node().get_logger(), "Response: %s", resp.value->message.c_str());
   }
 }
 ```
@@ -546,7 +546,7 @@ Task<void> run(CoContext & ctx)
   try {
     co_await ctx.sleep(std::chrono::seconds(10));
   } catch (const CancelledException &) {
-    RCLCPP_INFO(ctx.node()->get_logger(), "Cancelled!");
+    RCLCPP_INFO(ctx.node().get_logger(), "Cancelled!");
   }
 }
 ```
@@ -579,7 +579,7 @@ See [`nested_demo.cpp`](rclcpp_async_example/src/nested_demo.cpp) for a full dem
 | `when_all(awaitables...)` | *awaitable* `tuple<Ts...>` | Await all tasks/awaitables concurrently |
 | `when_any(awaitables...)` | *awaitable* `variant<Ts...>` | Race tasks/awaitables, return first result |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
-| `node()` | `Node::SharedPtr` | Access the underlying node |
+| `node()` | `Node&` | Access the underlying node |
 
 ### TfBuffer
 
