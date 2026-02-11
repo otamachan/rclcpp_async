@@ -19,15 +19,15 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription([
         Node(
-            package='rclcpp_async',
+            package='rclcpp_async_example',
             executable='demo_server',
             name='demo_server',
             output='screen',
         ),
         Node(
-            package='rclcpp_async',
-            executable='subscriber',
-            name='async_subscriber',
+            package='rclcpp_async_example',
+            executable='service_client',
+            name='service_client',
             output='screen',
         ),
     ])
