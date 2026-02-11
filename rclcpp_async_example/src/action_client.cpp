@@ -23,28 +23,28 @@ using Fibonacci = example_interfaces::action::Fibonacci;
 
 rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
 {
-  auto client = rclcpp_action::create_client<Fibonacci>(ctx.node(), "fibonacci");
+  auto client = rclcpp_action::create_client<Fibonacci>(&ctx.node(), "fibonacci");
 
-  RCLCPP_INFO(ctx.node()->get_logger(), "Waiting for action server...");
+  RCLCPP_INFO(ctx.node().get_logger(), "Waiting for action server...");
   auto wait_result = co_await ctx.wait_for_action(client, std::chrono::seconds(10));
   if (!wait_result.ok()) {
-    RCLCPP_ERROR(ctx.node()->get_logger(), "Action server not available");
+    RCLCPP_ERROR(ctx.node().get_logger(), "Action server not available");
     co_return;
   }
-  RCLCPP_INFO(ctx.node()->get_logger(), "Action server found");
+  RCLCPP_INFO(ctx.node().get_logger(), "Action server found");
 
   Fibonacci::Goal goal;
   goal.order = 8;
 
-  RCLCPP_INFO(ctx.node()->get_logger(), "Sending goal: order=%d", goal.order);
+  RCLCPP_INFO(ctx.node().get_logger(), "Sending goal: order=%d", goal.order);
   auto goal_result = co_await ctx.send_goal<Fibonacci>(client, goal);
   if (!goal_result.ok()) {
-    RCLCPP_ERROR(ctx.node()->get_logger(), "Goal failed: %s", goal_result.error_msg.c_str());
+    RCLCPP_ERROR(ctx.node().get_logger(), "Goal failed: %s", goal_result.error_msg.c_str());
     co_return;
   }
 
   auto stream = *goal_result.value;
-  RCLCPP_INFO(ctx.node()->get_logger(), "Goal accepted, waiting for feedback...");
+  RCLCPP_INFO(ctx.node().get_logger(), "Goal accepted, waiting for feedback...");
 
   while (true) {
     auto feedback = co_await stream->next();
@@ -53,21 +53,21 @@ rclcpp_async::Task<void> run(rclcpp_async::CoContext & ctx)
     }
     auto & seq = (*feedback)->sequence;
     RCLCPP_INFO(
-      ctx.node()->get_logger(), "Feedback: sequence length=%zu, last=%d", seq.size(), seq.back());
+      ctx.node().get_logger(), "Feedback: sequence length=%zu, last=%d", seq.size(), seq.back());
   }
 
   auto result = stream->result();
   auto & seq = result.result->sequence;
   RCLCPP_INFO(
-    ctx.node()->get_logger(), "Result: sequence length=%zu, last=%d", seq.size(), seq.back());
-  RCLCPP_INFO(ctx.node()->get_logger(), "Done");
+    ctx.node().get_logger(), "Result: sequence length=%zu, last=%d", seq.size(), seq.back());
+  RCLCPP_INFO(ctx.node().get_logger(), "Done");
 }
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("action_client");
-  rclcpp_async::CoContext ctx(node);
+  rclcpp_async::CoContext ctx(*node);
 
   auto task = ctx.create_task(run(ctx));
 

@@ -28,7 +28,7 @@ rclcpp_async::Task<void> listen(rclcpp_async::CoContext & ctx, std::string topic
       break;
     }
     auto & data = (*msg)->data;
-    RCLCPP_INFO(ctx.node()->get_logger(), "[%s] %s", topic.c_str(), data.c_str());
+    RCLCPP_INFO(ctx.node().get_logger(), "[%s] %s", topic.c_str(), data.c_str());
   }
 }
 
@@ -36,7 +36,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("async_subscriber");
-  rclcpp_async::CoContext ctx(node);
+  rclcpp_async::CoContext ctx(*node);
 
   // Subscribe to two topics in parallel
   auto task_a = ctx.create_task(listen(ctx, "topic_a"));

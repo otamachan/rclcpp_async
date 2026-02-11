@@ -40,14 +40,14 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("nested_demo");
-  rclcpp_async::CoContext ctx(node);
+  rclcpp_async::CoContext ctx(*node);
 
   // --- Service: slow_square (leaf service) ---
   // Simulates a slow computation: sleeps 1s then responds.
   auto slow_square_srv = ctx.create_service<SetBool>(
     "slow_square",
     [&ctx](SetBool::Request::SharedPtr req) -> rclcpp_async::Task<SetBool::Response> {
-      auto logger = ctx.node()->get_logger();
+      auto logger = ctx.node().get_logger();
       RCLCPP_INFO(logger, "[slow_square] received (data=%s)", req->data ? "true" : "false");
       co_await ctx.sleep(1s);
       SetBool::Response resp;
@@ -65,7 +65,7 @@ int main(int argc, char * argv[])
     "validate",
     [&ctx,
      slow_square_client](SetBool::Request::SharedPtr req) -> rclcpp_async::Task<SetBool::Response> {
-      auto logger = ctx.node()->get_logger();
+      auto logger = ctx.node().get_logger();
       RCLCPP_INFO(logger, "[validate] received (data=%s)", req->data ? "true" : "false");
 
       // Nested call to slow_square
@@ -89,7 +89,7 @@ int main(int argc, char * argv[])
     "fibonacci",
     [&ctx, validate_client](
       rclcpp_async::GoalContext<Fibonacci> goal) -> rclcpp_async::Task<Fibonacci::Result> {
-      auto logger = ctx.node()->get_logger();
+      auto logger = ctx.node().get_logger();
       RCLCPP_INFO(logger, "[fibonacci] received goal: order=%d", goal.goal().order);
 
       // Nested call to validate (which itself calls slow_square)
@@ -125,8 +125,8 @@ int main(int argc, char * argv[])
 
   // --- Client task: send fibonacci goal ---
   auto client_task = ctx.create_task([&ctx]() -> rclcpp_async::Task<void> {
-    auto logger = ctx.node()->get_logger();
-    auto action_client = rclcpp_action::create_client<Fibonacci>(ctx.node(), "fibonacci");
+    auto logger = ctx.node().get_logger();
+    auto action_client = rclcpp_action::create_client<Fibonacci>(&ctx.node(), "fibonacci");
 
     RCLCPP_INFO(logger, "[client] waiting for action server...");
     auto wait_result = co_await ctx.wait_for_action(action_client, 10s);

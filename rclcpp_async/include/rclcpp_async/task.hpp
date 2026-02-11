@@ -129,8 +129,21 @@ struct Task
   {
     o.handle = nullptr;
   }
-  Task & operator=(Task &&) = delete;
+  Task & operator=(Task && o) noexcept
+  {
+    if (this != &o) {
+      if (handle) {
+        handle.destroy();
+      }
+      handle = o.handle;
+      started_ = o.started_;
+      parent_cancel_cb_ = std::move(o.parent_cancel_cb_);
+      o.handle = nullptr;
+    }
+    return *this;
+  }
   Task(const Task &) = delete;
+  Task() noexcept : handle(nullptr) {}
 
 private:
   explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}
@@ -231,8 +244,21 @@ struct Task<void>
   {
     o.handle = nullptr;
   }
-  Task & operator=(Task &&) = delete;
+  Task & operator=(Task && o) noexcept
+  {
+    if (this != &o) {
+      if (handle) {
+        handle.destroy();
+      }
+      handle = o.handle;
+      started_ = o.started_;
+      parent_cancel_cb_ = std::move(o.parent_cancel_cb_);
+      o.handle = nullptr;
+    }
+    return *this;
+  }
   Task(const Task &) = delete;
+  Task() noexcept : handle(nullptr) {}
 
 private:
   explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}

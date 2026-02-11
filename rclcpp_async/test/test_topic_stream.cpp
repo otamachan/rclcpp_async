@@ -33,7 +33,7 @@ protected:
   void SetUp() override
   {
     node_ = std::make_shared<rclcpp::Node>("test_topic_node");
-    ctx_ = std::make_unique<CoContext>(node_);
+    ctx_ = std::make_unique<CoContext>(*node_);
     executor_.add_node(node_);
     pub_ = node_->create_publisher<StringMsg>("test_topic", 10);
   }

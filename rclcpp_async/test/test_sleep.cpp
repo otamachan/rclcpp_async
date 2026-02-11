@@ -31,7 +31,7 @@ protected:
   void SetUp() override
   {
     node_ = std::make_shared<rclcpp::Node>("test_sleep_node");
-    ctx_ = std::make_unique<CoContext>(node_);
+    ctx_ = std::make_unique<CoContext>(*node_);
     executor_.add_node(node_);
   }
 
