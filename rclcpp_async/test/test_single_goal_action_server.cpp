@@ -215,22 +215,28 @@ TEST_F(SingleGoalActionServerTest, PreemptDuringExecution)
   EXPECT_EQ(goal_b_sequence[4], 3);
 }
 
+// Cancel now throws CancelledException in the server callback,
+// so the server does not need to poll goal.is_canceling().
 TEST_F(SingleGoalActionServerTest, ClientCancel)
 {
+  bool caught_cancel = false;
+
   action_server_ = create_single_goal_action_server<Fibonacci>(
     *ctx_, "test_single_goal_action",
-    [this](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
+    [this, &caught_cancel](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
       Fibonacci::Feedback feedback;
       feedback.sequence = {0, 1};
 
-      for (int i = 2; i < goal.goal().order; i++) {
-        if (goal.is_canceling()) {
-          break;
+      try {
+        for (int i = 2; i < goal.goal().order; i++) {
+          auto n = feedback.sequence.size();
+          feedback.sequence.push_back(feedback.sequence[n - 1] + feedback.sequence[n - 2]);
+          goal.publish_feedback(feedback);
+          co_await ctx_->sleep(100ms);
         }
-        auto n = feedback.sequence.size();
-        feedback.sequence.push_back(feedback.sequence[n - 1] + feedback.sequence[n - 2]);
-        goal.publish_feedback(feedback);
-        co_await ctx_->sleep(100ms);
+      } catch (const CancelledException &) {
+        caught_cancel = true;
+        throw;
       }
 
       Fibonacci::Result result;
@@ -273,4 +279,68 @@ TEST_F(SingleGoalActionServerTest, ClientCancel)
 
   ASSERT_TRUE(task.handle.done());
   EXPECT_TRUE(goal_cancelled);
+  EXPECT_TRUE(caught_cancel);
+}
+
+TEST_F(SingleGoalActionServerTest, ShieldCompletesBeforeCancel)
+{
+  bool shield_completed = false;
+  bool caught_cancel = false;
+
+  action_server_ = create_single_goal_action_server<Fibonacci>(
+    *ctx_, "test_single_goal_action",
+    [this, &shield_completed, &caught_cancel](GoalContext<Fibonacci>) -> Task<Fibonacci::Result> {
+      auto critical = [this]() -> Task<void> { co_await ctx_->sleep(200ms); };
+
+      try {
+        co_await shield(critical());
+        shield_completed = true;
+        co_await ctx_->sleep(10s);
+      } catch (const CancelledException &) {
+        caught_cancel = true;
+        throw;
+      }
+
+      Fibonacci::Result result;
+      result.sequence = {42};
+      co_return result;
+    });
+
+  wait_for_server();
+
+  bool goal_cancelled = false;
+
+  auto coro = [&]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 5;
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    EXPECT_TRUE(goal_result.ok());
+    if (!goal_result.ok()) {
+      co_return;
+    }
+
+    auto stream = *goal_result.value;
+
+    // Send cancel immediately — shield should defer it
+    co_await ctx_->sleep(50ms);
+    co_await stream->cancel_goal();
+
+    while (true) {
+      auto feedback = co_await stream->next();
+      if (!feedback.has_value()) {
+        break;
+      }
+    }
+
+    auto wrapped = stream->result();
+    goal_cancelled = (wrapped.code == rclcpp_action::ResultCode::CANCELED);
+  };
+
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task, 15s);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(goal_cancelled);
+  EXPECT_TRUE(shield_completed);
+  EXPECT_TRUE(caught_cancel);
 }

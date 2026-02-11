@@ -308,7 +308,9 @@ public:
               gh->succeed(result);
             }
           } catch (const CancelledException &) {
-            if (gh->is_active()) {
+            if (gh->is_canceling()) {
+              gh->canceled(std::make_shared<typename ActionT::Result>());
+            } else if (gh->is_active()) {
               gh->abort(std::make_shared<typename ActionT::Result>());
             }
           }
