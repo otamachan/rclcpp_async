@@ -253,7 +253,7 @@ auto server = create_single_goal_action_server<Fibonacci>(
   });
 ```
 
-Preemption is automatic -- the user callback simply uses `co_await` as normal, and `CancelledException` is thrown at the current suspension point when a new goal preempts the current one. Synchronous cleanup can be done in a `catch` block:
+Both preemption (new goal arrives) and client cancel automatically throw `CancelledException` at the current `co_await` suspension point -- no need to poll `goal.is_canceling()`. Synchronous cleanup can be done in a `catch` block:
 
 ```cpp
 [&ctx](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
@@ -263,6 +263,20 @@ Preemption is automatic -- the user callback simply uses `co_await` as normal, a
     stop_motor();  // Cleanup runs before the next goal starts
     throw;
   }
+}
+```
+
+Use `shield()` to protect critical sections that must complete even during cancellation:
+
+```cpp
+[&ctx](GoalContext<Fibonacci> goal) -> Task<Fibonacci::Result> {
+  // This sleep completes even if cancel is requested during it
+  co_await shield(save_state(ctx));
+
+  // Cancel takes effect at the next unshielded co_await
+  co_await ctx.sleep(std::chrono::seconds(10));
+
+  // ...
 }
 ```
 
@@ -551,6 +565,21 @@ Task<void> run(CoContext & ctx)
 }
 ```
 
+### shield
+
+`shield(task)` prevents a parent's cancellation from propagating to the inner task. The shielded task runs to completion even if the parent is cancelled. After the shielded task finishes, `CancelledException` is thrown at the next unshielded `co_await`.
+
+```cpp
+Task<void> run(CoContext & ctx)
+{
+  // This task completes even if run() is cancelled during it
+  co_await shield(save_critical_data(ctx));
+
+  // CancelledException is thrown here if cancelled
+  co_await ctx.sleep(std::chrono::seconds(1));
+}
+```
+
 ## No Deadlocks on Single-Threaded Executors
 
 A key advantage of coroutine-based I/O: nested service calls work without deadlocks, even on a single-threaded executor. For example, a service handler can `co_await` another service call, which can itself call yet another service -- all on the same thread.
@@ -578,6 +607,7 @@ See [`nested_demo.cpp`](rclcpp_async_example/src/nested_demo.cpp) for a full dem
 | `wait_for(awaitable, timeout)` | `Task<Result<T>>` | Race an awaitable against a timeout |
 | `when_all(awaitables...)` | *awaitable* `tuple<Ts...>` | Await all tasks/awaitables concurrently |
 | `when_any(awaitables...)` | *awaitable* `variant<Ts...>` | Race tasks/awaitables, return first result |
+| `shield(task)` | *awaitable* `T` | Protect a task from parent cancellation |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node::SharedPtr` | Access the underlying node |
 

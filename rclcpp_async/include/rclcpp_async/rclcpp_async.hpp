@@ -22,6 +22,7 @@
 #include "rclcpp_async/goal_stream.hpp"
 #include "rclcpp_async/mutex.hpp"
 #include "rclcpp_async/result.hpp"
+#include "rclcpp_async/shield.hpp"
 #include "rclcpp_async/single_goal_action_server.hpp"
 #include "rclcpp_async/task.hpp"
 #include "rclcpp_async/tf_buffer.hpp"

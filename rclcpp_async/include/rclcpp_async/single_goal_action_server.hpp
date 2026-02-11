@@ -76,7 +76,8 @@ auto create_single_goal_action_server(
       *current_stop = std::stop_source{};
       return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     },
-    [](std::shared_ptr<rclcpp_action::ServerGoalHandle<ActionT>>) {
+    [current_stop](std::shared_ptr<rclcpp_action::ServerGoalHandle<ActionT>>) {
+      current_stop->request_stop();
       return rclcpp_action::CancelResponse::ACCEPT;
     });
 }
