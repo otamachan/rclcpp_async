@@ -583,6 +583,10 @@ See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full
 | `lookup_transform(target, source)` | `optional<TransformStamped>` | Sync lookup of latest transform |
 | `lookup_transform(target, source, time)` | *awaitable* `TransformStamped` | Async lookup; suspends until the transform is available |
 
+## Benchmarks
+
+See [rclcpp_async/test/benchmark/README.md](rclcpp_async/test/benchmark/README.md) for benchmark results comparing coroutine vs callback performance.
+
 ## License
 
 Apache-2.0

@@ -152,6 +152,8 @@ if(BUILD_TESTING)
 
   ament_add_ros_isolated_gtest(test_tf_buffer test/test_tf_buffer.cpp)
   target_link_libraries(test_tf_buffer ${PROJECT_NAME})
+
+  add_subdirectory(test/benchmark)
 endif()
 
 ament_package()
