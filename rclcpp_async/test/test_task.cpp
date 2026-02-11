@@ -252,3 +252,38 @@ TEST(TaskT, AwaitLazyStillWorks)
   ASSERT_TRUE(task.handle.done());
   EXPECT_EQ(*task.handle.promise().value, 43);
 }
+
+TEST(TaskT, OperatorBoolAndDone)
+{
+  auto task = returns_42();
+  EXPECT_TRUE(static_cast<bool>(task));
+  EXPECT_FALSE(task.done());
+
+  task.handle.resume();
+  EXPECT_TRUE(static_cast<bool>(task));
+  EXPECT_TRUE(task.done());
+
+  // After move, source becomes null
+  auto task2 = std::move(task);
+  EXPECT_FALSE(static_cast<bool>(task));
+  EXPECT_FALSE(task.done());
+  EXPECT_TRUE(static_cast<bool>(task2));
+  EXPECT_TRUE(task2.done());
+}
+
+TEST(TaskVoid, OperatorBoolAndDone)
+{
+  auto task = does_nothing();
+  EXPECT_TRUE(static_cast<bool>(task));
+  EXPECT_FALSE(task.done());
+
+  task.handle.resume();
+  EXPECT_TRUE(static_cast<bool>(task));
+  EXPECT_TRUE(task.done());
+
+  auto task2 = std::move(task);
+  EXPECT_FALSE(static_cast<bool>(task));
+  EXPECT_FALSE(task.done());
+  EXPECT_TRUE(static_cast<bool>(task2));
+  EXPECT_TRUE(task2.done());
+}

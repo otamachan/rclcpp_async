@@ -623,6 +623,25 @@ See [`nested_demo.cpp`](rclcpp_async_example/src/nested_demo.cpp) for a full dem
 
 See [rclcpp_async/test/benchmark/README.md](rclcpp_async/test/benchmark/README.md) for benchmark results comparing coroutine vs callback performance.
 
+### Task
+
+| Method | Returns | Description |
+|---|---|---|
+| `operator bool()` | `bool` | `true` if the task holds a valid coroutine (not moved-from) |
+| `done()` | `bool` | `true` if the coroutine has completed (`false` for null tasks) |
+| `cancel()` | `void` | Request cancellation via `CancelledException` |
+
+```cpp
+auto task = ctx.create_task(run(ctx));
+
+if (task) {       // true -- valid coroutine
+  // ...
+}
+if (task.done()) {
+  // coroutine has finished
+}
+```
+
 ## License
 
 Apache-2.0
