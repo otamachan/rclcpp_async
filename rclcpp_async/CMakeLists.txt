@@ -60,32 +60,6 @@ if(BUILD_TESTING)
   find_package(std_srvs REQUIRED)
   find_package(example_interfaces REQUIRED)
 
-  # Examples
-  add_executable(demo_server example/demo_server.cpp)
-  target_link_libraries(demo_server ${PROJECT_NAME}
-    ${std_msgs_TARGETS} ${std_srvs_TARGETS} ${example_interfaces_TARGETS})
-
-  add_executable(subscriber example/subscriber.cpp)
-  target_link_libraries(subscriber ${PROJECT_NAME} ${std_msgs_TARGETS})
-
-  add_executable(service_client example/service_client.cpp)
-  target_link_libraries(service_client ${PROJECT_NAME} ${std_srvs_TARGETS})
-
-  add_executable(action_client example/action_client.cpp)
-  target_link_libraries(action_client ${PROJECT_NAME} ${example_interfaces_TARGETS})
-
-  add_executable(nested_demo example/nested_demo.cpp)
-  target_link_libraries(nested_demo ${PROJECT_NAME}
-    ${std_srvs_TARGETS} ${example_interfaces_TARGETS})
-
-  install(TARGETS demo_server subscriber service_client action_client nested_demo
-    DESTINATION lib/${PROJECT_NAME}
-  )
-
-  install(DIRECTORY launch/
-    DESTINATION share/${PROJECT_NAME}/launch
-  )
-
   # Level 1: Pure unit tests (no ROS2 runtime)
   ament_add_gtest(test_result test/test_result.cpp)
   target_link_libraries(test_result ${PROJECT_NAME})

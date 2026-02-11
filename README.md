@@ -1,11 +1,5 @@
 # rclcpp_async
 
-[![CI](https://github.com/otamachan/rclcpp_async/actions/workflows/ci.yml/badge.svg)](https://github.com/otamachan/rclcpp_async/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
-![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-blue.svg)
-![ROS 2 Rolling](https://img.shields.io/badge/ROS%202-Rolling-blue.svg)
-
 A header-only C++20 coroutine library that brings `async/await` to ROS 2, inspired by [icey](https://github.com/iv461/icey).
 
 Write asynchronous ROS 2 code that reads like sequential code -- no callback nesting, no deadlocks, no `std::mutex`, no state machines -- all on a single-threaded executor.
@@ -555,7 +549,7 @@ Task<void> run(CoContext & ctx)
 
 A key advantage of coroutine-based I/O: nested service calls work without deadlocks, even on a single-threaded executor. For example, a service handler can `co_await` another service call, which can itself call yet another service -- all on the same thread.
 
-See [`example/nested_demo.cpp`](rclcpp_async/example/nested_demo.cpp) for a full demonstration.
+See [`nested_demo.cpp`](rclcpp_async_example/src/nested_demo.cpp) for a full demonstration.
 
 ## API Reference
 

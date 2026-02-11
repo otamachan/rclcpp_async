@@ -19,6 +19,7 @@ jobs:
         run: |
           mkdir -p ws/src
           ln -s ../../rclcpp_async ws/src/rclcpp_async
+          ln -s ../../rclcpp_async_example ws/src/rclcpp_async_example
       - name: Build and test
         run: |
           ROS_DISTRO=${{ matrix.ros_distro }} ./run.sh bash -c \
