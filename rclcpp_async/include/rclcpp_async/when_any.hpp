@@ -152,7 +152,7 @@ struct WhenAnyAwaiter
   std::vector<RaceJoinTask> joins;
   std::array<std::stop_source *, N> child_sources;
   std::stop_token token;
-  std::unique_ptr<StopCb> cancel_cb_;
+  std::shared_ptr<StopCb> cancel_cb_;
 
   void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -163,11 +163,11 @@ struct WhenAnyAwaiter
     state->continuation = h;
 
     if (token.stop_possible()) {
-      cancel_cb_ = std::unique_ptr<StopCb>(new StopCb(token, [this]() {
+      cancel_cb_ = std::make_shared<StopCb>(token, [this]() {
         for (auto * ss : child_sources) {
           ss->request_stop();
         }
-      }));
+      });
     }
 
     for (auto & jt : joins) {

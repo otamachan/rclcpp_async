@@ -52,7 +52,7 @@ public:
   {
     Mutex & mutex;
     std::stop_token token;
-    std::unique_ptr<StopCb> cancel_cb_;
+    std::shared_ptr<StopCb> cancel_cb_;
     std::shared_ptr<bool> active;
 
     void set_token(std::stop_token t) { token = std::move(t); }

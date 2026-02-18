@@ -127,6 +127,9 @@ if(BUILD_TESTING)
   ament_add_ros_isolated_gtest(test_tf_buffer test/test_tf_buffer.cpp)
   target_link_libraries(test_tf_buffer ${PROJECT_NAME})
 
+  ament_add_ros_isolated_gtest(test_task_destroy test/test_task_destroy.cpp)
+  target_link_libraries(test_task_destroy ${PROJECT_NAME} ${example_interfaces_TARGETS})
+
   add_subdirectory(test/benchmark)
 endif()
 

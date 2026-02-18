@@ -108,7 +108,7 @@ public:
     std::string source_frame;
     tf2::TimePoint time;
     std::stop_token token;
-    std::unique_ptr<StopCb> cancel_cb_;
+    std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
     std::shared_ptr<PendingRequest> request;
 
