@@ -629,6 +629,7 @@ See [rclcpp_async/test/benchmark/README.md](rclcpp_async/test/benchmark/README.m
 |---|---|---|
 | `operator bool()` | `bool` | `true` if the task holds a valid coroutine (not moved-from) |
 | `done()` | `bool` | `true` if the coroutine has completed (`false` for null tasks) |
+| `result()` | `T&` | Get the result of a completed `Task<T>` (rethrows if exception) |
 | `cancel()` | `void` | Request cancellation via `CancelledException` |
 
 ```cpp
@@ -638,7 +639,7 @@ if (task) {       // true -- valid coroutine
   // ...
 }
 if (task.done()) {
-  // coroutine has finished
+  auto & value = task.result();  // access the result without co_await
 }
 ```
 

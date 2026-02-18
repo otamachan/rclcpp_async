@@ -271,6 +271,31 @@ TEST(TaskT, OperatorBoolAndDone)
   EXPECT_TRUE(task2.done());
 }
 
+TEST(TaskT, ResultReturnsValue)
+{
+  auto task = returns_42();
+  task.handle.resume();
+  ASSERT_TRUE(task.done());
+  EXPECT_EQ(task.result(), 42);
+}
+
+TEST(TaskT, ResultReturnsReference)
+{
+  auto task = returns_42();
+  task.handle.resume();
+  ASSERT_TRUE(task.done());
+  task.result() = 99;
+  EXPECT_EQ(task.result(), 99);
+}
+
+TEST(TaskT, ResultRethrowsException)
+{
+  auto task = throws_runtime_error();
+  task.handle.resume();
+  ASSERT_TRUE(task.done());
+  EXPECT_THROW(task.result(), std::runtime_error);
+}
+
 TEST(TaskVoid, OperatorBoolAndDone)
 {
   auto task = does_nothing();
