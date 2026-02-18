@@ -116,6 +116,14 @@ struct Task
     return std::move(*handle.promise().value);
   }
 
+  T & result()
+  {
+    if (handle.promise().exception) {
+      std::rethrow_exception(handle.promise().exception);
+    }
+    return *handle.promise().value;
+  }
+
   void cancel() { handle.promise().stop_source.request_stop(); }
 
   explicit operator bool() const noexcept { return handle != nullptr; }
