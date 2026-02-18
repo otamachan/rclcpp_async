@@ -38,7 +38,7 @@ struct SleepAwaiter
   std::chrono::nanoseconds duration;
   rclcpp::TimerBase::SharedPtr timer;
   std::stop_token token;
-  std::unique_ptr<StopCb> cancel_cb_;
+  std::shared_ptr<StopCb> cancel_cb_;
   bool cancelled = false;
   bool done = false;
 

@@ -37,6 +37,7 @@ class TimerStream
   rclcpp::TimerBase::SharedPtr timer_;
   std::coroutine_handle<> waiter_;
   int pending_ = 0;
+  bool closed_ = false;
 
   friend class CoContext;
 
@@ -47,14 +48,14 @@ public:
   {
     TimerStream & stream;
     std::stop_token token;
-    std::unique_ptr<StopCb> cancel_cb_;
+    std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
     bool await_ready()
     {
-      if (token.stop_requested()) {
+      if (token.stop_requested() || stream.closed_) {
         cancelled = true;
         return true;
       }
@@ -80,6 +81,8 @@ public:
 
   void cancel()
   {
+    closed_ = true;
+    waiter_ = nullptr;
     if (timer_) {
       timer_->cancel();
     }

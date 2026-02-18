@@ -124,6 +124,7 @@ struct Task
   ~Task()
   {
     if (handle) {
+      handle.promise().stop_source.request_stop();
       handle.destroy();
     }
   }
@@ -242,6 +243,7 @@ struct Task<void>
   ~Task()
   {
     if (handle) {
+      handle.promise().stop_source.request_stop();
       handle.destroy();
     }
   }

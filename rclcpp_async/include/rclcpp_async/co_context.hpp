@@ -234,6 +234,9 @@ public:
   {
     auto stream = std::make_shared<TimerStream>(*this);
     stream->timer_ = node_.create_wall_timer(period, [s = stream, this]() {
+      if (s->closed_) {
+        return;
+      }
       if (s->waiter_) {
         auto w = s->waiter_;
         s->waiter_ = nullptr;
@@ -335,21 +338,20 @@ public:
 
 template <typename DonePred, typename CancelAction>
 inline void register_cancel(
-  std::unique_ptr<StopCb> & out, std::stop_token token, CoContext & ctx, std::coroutine_handle<> h,
+  std::shared_ptr<StopCb> & out, std::stop_token token, CoContext & ctx, std::coroutine_handle<> h,
   DonePred is_done, CancelAction action)
 {
-  if (!token.stop_possible()) {
-    return;
-  }
-  out = std::unique_ptr<StopCb>(new StopCb(token, [&ctx, h, is_done, action]() {
-    ctx.post([&ctx, h, is_done, action]() {
+  out = std::make_shared<StopCb>(token, [&ctx, h, is_done, action, &out]() {
+    ctx.post([&ctx, h, is_done, action, weak = std::weak_ptr(out)]() {
       if (is_done()) {
         return;
       }
       action();
-      ctx.resume(h);
+      if (weak.lock()) {
+        ctx.resume(h);
+      }
     });
-  }));
+  });
 }
 
 template <typename ServiceT>
@@ -386,13 +388,19 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 
   timer = ctx.node().create_wall_timer(duration, [finish]() { finish(); });
 
-  register_cancel(
-    cancel_cb_, token, ctx, h, [this]() { return done; },
-    [this]() {
-      done = true;
-      timer->cancel();
-      cancelled = true;
+  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
+    if (done) {
+      return;
+    }
+    done = true;
+    timer->cancel();
+    cancelled = true;
+    ctx.post([h, weak = std::weak_ptr(cb)]() {
+      if (weak.lock()) {
+        h.resume();
+      }
     });
+  });
 }
 
 template <typename MsgT>
@@ -453,18 +461,18 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 
   typename rclcpp_action::Client<ActionT>::SendGoalOptions options;
 
-  options.feedback_callback = [this](auto, const auto & feedback) {
+  options.feedback_callback = [s = stream](auto, const auto & feedback) {
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kFeedback;
     event.feedback = feedback;
-    stream->push(std::move(event));
+    s->push(std::move(event));
   };
 
-  options.result_callback = [this](const auto & wrapped_result) {
+  options.result_callback = [s = stream](const auto & wrapped_result) {
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kComplete;
     event.result = wrapped_result;
-    stream->push(std::move(event));
+    s->push(std::move(event));
   };
 
   options.goal_response_callback = [this, h](const auto & goal_handle) {
@@ -543,12 +551,18 @@ inline void Mutex::unlock()
 inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   stream.waiter_ = h;
-  register_cancel(
-    cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
-    [this]() {
-      stream.waiter_ = nullptr;
-      cancelled = true;
+  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
+    if (stream.waiter_ != h) {
+      return;
+    }
+    stream.cancel();
+    cancelled = true;
+    stream.ctx_.post([h, weak = std::weak_ptr(cb)]() {
+      if (weak.lock()) {
+        h.resume();
+      }
     });
+  });
 }
 
 template <typename T>
@@ -561,23 +575,25 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
     }
     ch.waiter_ = h;
   }  // release ch.mutex_ before stop_callback to avoid deadlock
-  if (token.stop_possible()) {
-    cancel_cb_ = std::unique_ptr<StopCb>(new StopCb(token, [this, h]() {
-      std::coroutine_handle<> w;
-      {
-        std::lock_guard lock(ch.mutex_);
-        if (ch.waiter_ != h) {
-          return;
+  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
+    std::coroutine_handle<> w;
+    {
+      std::lock_guard lock(ch.mutex_);
+      if (ch.waiter_ != h) {
+        return;
+      }
+      w = ch.waiter_;
+      ch.waiter_ = nullptr;
+    }
+    if (w) {
+      cancelled = true;
+      ch.ctx_.post([w, weak = std::weak_ptr(cb)]() {
+        if (weak.lock()) {
+          w.resume();
         }
-        w = ch.waiter_;
-        ch.waiter_ = nullptr;
-      }
-      if (w) {
-        cancelled = true;
-        ch.ctx_.post([w]() { w.resume(); });
-      }
-    }));
-  }
+      });
+    }
+  });
   return true;
 }
 
