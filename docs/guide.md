@@ -1,6 +1,6 @@
 # Guide
 
-## Topics and Timers
+## Basics
 
 ### create_task
 
@@ -24,6 +24,8 @@ auto task_a = ctx.create_task(do_work_a(ctx));
 auto task_b = ctx.create_task(do_work_b(ctx));
 // Both run concurrently via co_await yield points
 ```
+
+## Topics and Timers
 
 ### Subscriber (TopicStream)
 
