@@ -10,10 +10,15 @@ if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
   docker build --build-arg "ROS_DISTRO=${ROS_DISTRO}" -t "$IMAGE_NAME" "$REPO_ROOT"
 fi
 
+WORKDIR="$REPO_ROOT/ws"
+if [ "$1" = "mkdocs" ]; then
+  WORKDIR="$REPO_ROOT"
+fi
+
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -v "$REPO_ROOT:$REPO_ROOT" \
-  -w "$REPO_ROOT/ws" \
+  -w "$WORKDIR" \
   -e HOME=/tmp/home \
   -e "ROS_DISTRO=${ROS_DISTRO}" \
   "$IMAGE_NAME" \
