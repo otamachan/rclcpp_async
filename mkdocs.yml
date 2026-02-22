@@ -2,6 +2,10 @@ site_name: rclcpp_async
 site_description: A header-only C++20 coroutine library for ROS 2
 repo_url: https://github.com/otamachan/rclcpp_async
 
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+
 theme:
   name: material
   features:

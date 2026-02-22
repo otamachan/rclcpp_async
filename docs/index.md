@@ -49,3 +49,6 @@ int main(int argc, char * argv[])
 Every coroutine returns `Task<T>` and is launched with `ctx.create_task(...)`.
 The standard `rclcpp::spin()` drives execution -- no special executor needed.
 
+## Learn More
+
+- **[Getting Started](getting-started.md)** -- prerequisites, installation, and a walkthrough of the Quick Start example
