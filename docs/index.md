@@ -9,13 +9,17 @@ all on a single-threaded executor.
 ## Features
 
 - **Subscribers** -- async streams with `co_await stream->next()`
-- **Service client/server** -- `co_await ctx.send_request(...)` with coroutine handlers
-- **Action client/server** -- goal streaming, single-goal preemption, `shield()`
+- **Service client** -- `co_await ctx.send_request(...)` with no shared futures
+- **Service server** -- coroutine handlers that can `co_await` internally
+- **Action client** -- goal streaming with `co_await stream->next()` for feedback
+- **Action server** -- coroutine handlers that can `co_await` internally
 - **Timers** -- periodic async streams
-- **TF lookups** -- `co_await tf.lookup_transform(...)`
 - **Concurrency primitives** -- `when_all`, `when_any`, `Event`, `Mutex`, `Channel`
 - **Cancellation** -- `task.cancel()` throws `CancelledException` at `co_await` points
 - **Timeout** -- `ctx.wait_for(awaitable, timeout)` returns `Result<T>`
+- **Plus**
+    - **TF lookups** -- `co_await tf.lookup_transform(...)` via `TfBuffer`
+    - **Single-goal action server** -- handles one goal at a time (like ROS 1 `SimpleActionServer`) with automatic preemption
 
 ## Quick Start
 
