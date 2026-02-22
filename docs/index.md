@@ -53,3 +53,4 @@ The standard `rclcpp::spin()` drives execution -- no special executor needed.
 
 - **[Getting Started](getting-started.md)** -- prerequisites, installation, and a walkthrough of the Quick Start example
 - **[Guide](guide.md)** -- topics, services, actions, concurrency primitives, cancellation, and TF lookups
+- **[API Reference](api-reference.md)** -- full list of public types and methods

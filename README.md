@@ -74,6 +74,7 @@ Every coroutine returns `Task<T>` and is launched with `ctx.create_task(...)`. T
 
 - [Getting Started](https://otamachan.github.io/rclcpp_async/getting-started/) -- prerequisites, installation, walkthrough
 - [Guide](https://otamachan.github.io/rclcpp_async/guide/) -- topics, services, actions, concurrency, cancellation, TF
+- [API Reference](https://otamachan.github.io/rclcpp_async/api-reference/) -- full list of public types and methods
 
 ## Benchmarks
 
