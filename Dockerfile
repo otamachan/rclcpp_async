@@ -19,4 +19,4 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     python3-pip \
   && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --break-system-packages mkdocs-material
+RUN pip install --break-system-packages --ignore-installed zensical

@@ -11,7 +11,7 @@ if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
 fi
 
 WORKDIR="$REPO_ROOT/ws"
-if [ "$1" = "mkdocs" ]; then
+if [ "$1" = "zensical" ]; then
   WORKDIR="$REPO_ROOT"
 fi
 
