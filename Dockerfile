@@ -16,4 +16,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     ros-${ROS_DISTRO}-example-interfaces \
     ros-${ROS_DISTRO}-tf2-ros \
     ros-${ROS_DISTRO}-ros2launch \
+    python3-pip \
   && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --break-system-packages mkdocs-material
