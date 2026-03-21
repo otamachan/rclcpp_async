@@ -35,9 +35,9 @@ target_link_libraries(${PROJECT_NAME} INTERFACE
 )
 target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 
-if(CMAKE_COMPILER_IS_GNUCXX)
-  target_compile_options(${PROJECT_NAME} INTERFACE -fcoroutines)
-endif()
+# Note: -fcoroutines is NOT propagated via INTERFACE to avoid polluting
+# compile_commands.json for clang-tidy. Consumers using GCC < 14 must add
+# -fcoroutines themselves (e.g. via add_compile_options or pfr_package).
 
 install(
   DIRECTORY include/
