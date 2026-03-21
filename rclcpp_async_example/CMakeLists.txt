@@ -8,7 +8,10 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations -fcoroutines)
+  add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations)
+endif()
+if(CMAKE_COMPILER_IS_GNUCXX)
+  add_compile_options(-fcoroutines)
 endif()
 
 find_package(ament_cmake REQUIRED)
@@ -40,7 +43,7 @@ target_link_libraries(nested_demo rclcpp_async::rclcpp_async
 add_library(component_demo SHARED src/component_demo.cpp)
 target_link_libraries(component_demo rclcpp_async::rclcpp_async
   ${std_msgs_TARGETS} ${std_srvs_TARGETS})
-ament_target_dependencies(component_demo rclcpp_components)
+target_link_libraries(component_demo rclcpp_components::component)
 rclcpp_components_register_node(component_demo
   PLUGIN "rclcpp_async_example::ComponentDemo"
   EXECUTABLE component_demo_node)
