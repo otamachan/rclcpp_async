@@ -516,9 +516,11 @@ inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
 inline void Event::set()
 {
   set_ = true;
-  while (!waiters_.empty()) {
-    auto w = waiters_.front();
-    waiters_.pop();
+  std::queue<Waiter> pending;
+  pending.swap(waiters_);
+  while (!pending.empty()) {
+    auto w = pending.front();
+    pending.pop();
     if (*w.active) {
       *w.active = false;
       ctx_.resume(w.handle);

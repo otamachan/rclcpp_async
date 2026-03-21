@@ -187,6 +187,52 @@ TEST_F(EventTest, CancelDuringWait)
   EXPECT_TRUE(was_cancelled);
 }
 
+TEST_F(EventTest, SetDoesNotLoopWhenWaiterReregisters)
+{
+  // Reproduces the re-entrant infinite loop bug:
+  // 1. set() resumes a waiter synchronously
+  // 2. The waiter checks a condition, finds it unsatisfied, calls clear() + wait()
+  // 3. wait() re-registers a waiter in waiters_
+  // 4. set() sees waiters_ is non-empty and loops forever
+
+  Event event(*ctx_);
+  int value = 0;
+  int resume_count = 0;
+
+  auto consumer = [&]() -> Task<void> {
+    while (value != 42) {
+      event.clear();
+      co_await event.wait();
+      resume_count++;
+    }
+  };
+
+  auto consumer_task = ctx_->create_task(consumer());
+
+  // Spin to let consumer suspend on wait()
+  for (int i = 0; i < 10; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_EQ(resume_count, 0);
+
+  // set() with wrong value — consumer will clear + re-wait.
+  // With the bug, this never returns (infinite loop).
+  value = 1;
+  event.set();
+
+  // If we get here, set() returned. The consumer should have been resumed once.
+  EXPECT_EQ(resume_count, 1);
+
+  // Now satisfy the condition
+  value = 42;
+  event.set();
+  spin_until_done(consumer_task);
+
+  ASSERT_TRUE(consumer_task.handle.done());
+  EXPECT_EQ(resume_count, 2);
+}
+
 TEST_F(EventTest, CancelDoesNotDoubleResume)
 {
   Event event(*ctx_);
