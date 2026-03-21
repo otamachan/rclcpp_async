@@ -186,7 +186,7 @@ public:
   {
     auto stream = std::make_shared<TopicStream<MsgT>>(*this);
     stream->sub_ = node_.template create_subscription<MsgT>(
-      topic, qos, [s = stream](typename MsgT::SharedPtr msg) {
+      topic, qos, [s = stream](std::shared_ptr<const MsgT> msg) {
         if (s->closed_) {
           return;
         }

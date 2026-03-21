@@ -37,7 +37,7 @@ template <typename MsgT>
 class TopicStream
 {
   CoContext & ctx_;
-  std::queue<typename MsgT::SharedPtr> queue_;
+  std::queue<std::shared_ptr<const MsgT>> queue_;
   std::coroutine_handle<> waiter_;
   typename rclcpp::Subscription<MsgT>::SharedPtr sub_;
   bool closed_ = false;
@@ -49,7 +49,7 @@ public:
 
   struct NextAwaiter
   {
-    using SharedPtr = typename MsgT::SharedPtr;
+    using SharedPtr = std::shared_ptr<const MsgT>;
 
     TopicStream & stream;
     std::stop_token token;
