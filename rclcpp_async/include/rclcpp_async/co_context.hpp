@@ -35,6 +35,7 @@
 #include "rclcpp_async/cancelled_exception.hpp"
 #include "rclcpp_async/channel.hpp"
 #include "rclcpp_async/event.hpp"
+#include "rclcpp_async/executor.hpp"
 #include "rclcpp_async/goal_context.hpp"
 #include "rclcpp_async/goal_stream.hpp"
 #include "rclcpp_async/mutex.hpp"
@@ -50,8 +51,6 @@ namespace rclcpp_async
 {
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces)
-
-using StopCb = std::stop_callback<std::function<void()>>;
 
 class DrainWaitable : public rclcpp::Waitable
 {
@@ -113,7 +112,7 @@ public:
   }
 };
 
-class CoContext
+class CoContext : public Executor
 {
   std::shared_ptr<DrainWaitable> drain_;
   rclcpp::Node & node_;
@@ -129,10 +128,10 @@ public:
   CoContext & operator=(const CoContext &) = delete;
 
   // Post a callback to be executed on the executor thread (thread-safe).
-  void post(std::function<void()> fn) { drain_->post(std::move(fn)); }
+  void post(std::function<void()> fn) override { drain_->post(std::move(fn)); }
 
   // Resume a coroutine directly. Call only from the executor thread.
-  void resume(std::coroutine_handle<> h) { h.resume(); }
+  void resume(std::coroutine_handle<> h) override { h.resume(); }
 
   rclcpp::Node & node() { return node_; }
 
@@ -336,24 +335,6 @@ public:
   }
 };
 
-template <typename DonePred, typename CancelAction>
-inline void register_cancel(
-  std::shared_ptr<StopCb> & out, std::stop_token token, CoContext & ctx, std::coroutine_handle<> h,
-  DonePred is_done, CancelAction action)
-{
-  out = std::make_shared<StopCb>(token, [&ctx, h, is_done, action, &out]() {
-    ctx.post([&ctx, h, is_done, action, weak = std::weak_ptr(out)]() {
-      if (is_done()) {
-        return;
-      }
-      action();
-      if (weak.lock()) {
-        ctx.resume(h);
-      }
-    });
-  });
-}
-
 template <typename ServiceT>
 void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
 {
@@ -505,51 +486,6 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
     });
 }
 
-inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
-{
-  active = std::make_shared<bool>(true);
-  event.waiters_.push({h, active});
-  auto a = active;
-  register_cancel(cancel_cb_, token, event.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
-}
-
-inline void Event::set()
-{
-  set_ = true;
-  std::queue<Waiter> pending;
-  pending.swap(waiters_);
-  while (!pending.empty()) {
-    auto w = pending.front();
-    pending.pop();
-    if (*w.active) {
-      *w.active = false;
-      ctx_.resume(w.handle);
-    }
-  }
-}
-
-inline void Mutex::LockAwaiter::await_suspend(std::coroutine_handle<> h)
-{
-  active = std::make_shared<bool>(true);
-  mutex.waiters_.push({h, active});
-  auto a = active;
-  register_cancel(cancel_cb_, token, mutex.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
-}
-
-inline void Mutex::unlock()
-{
-  while (!waiters_.empty()) {
-    auto w = waiters_.front();
-    waiters_.pop();
-    if (*w.active) {
-      *w.active = false;
-      ctx_.resume(w.handle);
-      return;
-    }
-  }
-  locked_ = false;
-}
-
 inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   stream.waiter_ = h;
@@ -565,71 +501,6 @@ inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
       }
     });
   });
-}
-
-template <typename T>
-bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
-{
-  {
-    std::lock_guard lock(ch.mutex_);
-    if (!ch.queue_.empty() || ch.closed_) {
-      return false;  // don't suspend, data already available
-    }
-    ch.waiter_ = h;
-  }  // release ch.mutex_ before stop_callback to avoid deadlock
-  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
-    std::coroutine_handle<> w;
-    {
-      std::lock_guard lock(ch.mutex_);
-      if (ch.waiter_ != h) {
-        return;
-      }
-      w = ch.waiter_;
-      ch.waiter_ = nullptr;
-    }
-    if (w) {
-      cancelled = true;
-      ch.ctx_.post([w, weak = std::weak_ptr(cb)]() {
-        if (weak.lock()) {
-          w.resume();
-        }
-      });
-    }
-  });
-  return true;
-}
-
-template <typename T>
-void Channel<T>::send(T value)
-{
-  std::coroutine_handle<> w;
-  {
-    std::lock_guard lock(mutex_);
-    if (closed_) {
-      return;
-    }
-    queue_.push(std::move(value));
-    w = waiter_;
-    waiter_ = nullptr;
-  }
-  if (w) {
-    ctx_.post([w]() { w.resume(); });
-  }
-}
-
-template <typename T>
-void Channel<T>::close()
-{
-  std::coroutine_handle<> w;
-  {
-    std::lock_guard lock(mutex_);
-    closed_ = true;
-    w = waiter_;
-    waiter_ = nullptr;
-  }
-  if (w) {
-    ctx_.post([w]() { w.resume(); });
-  }
 }
 
 }  // namespace rclcpp_async

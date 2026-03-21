@@ -63,6 +63,15 @@ if(BUILD_TESTING)
   find_package(std_srvs REQUIRED)
   find_package(example_interfaces REQUIRED)
 
+  # Level 0: Pure C++ build test (no rclcpp on include path)
+  ament_add_gtest(test_pure_headers test/test_pure_headers.cpp)
+  target_include_directories(test_pure_headers PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_features(test_pure_headers PRIVATE cxx_std_20)
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    target_compile_options(test_pure_headers PRIVATE -fcoroutines)
+  endif()
+
   # Level 1: Pure unit tests (no ROS2 runtime)
   ament_add_gtest(test_result test/test_result.cpp)
   target_link_libraries(test_result ${PROJECT_NAME})

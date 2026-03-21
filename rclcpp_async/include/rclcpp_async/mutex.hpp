@@ -23,17 +23,14 @@
 #include <utility>
 
 #include "rclcpp_async/cancelled_exception.hpp"
+#include "rclcpp_async/executor.hpp"
 
 namespace rclcpp_async
 {
 
-class CoContext;
-
-using StopCb = std::stop_callback<std::function<void()>>;
-
 class Mutex
 {
-  CoContext & ctx_;
+  Executor & ctx_;
   bool locked_ = false;
 
   struct Waiter
@@ -44,7 +41,7 @@ class Mutex
   std::queue<Waiter> waiters_;
 
 public:
-  explicit Mutex(CoContext & ctx) : ctx_(ctx) {}
+  explicit Mutex(Executor & ctx) : ctx_(ctx) {}
 
   bool is_locked() const { return locked_; }
 
@@ -84,5 +81,27 @@ public:
 
   void unlock();
 };
+
+inline void Mutex::LockAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  active = std::make_shared<bool>(true);
+  mutex.waiters_.push({h, active});
+  auto a = active;
+  register_cancel(cancel_cb_, token, mutex.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
+}
+
+inline void Mutex::unlock()
+{
+  while (!waiters_.empty()) {
+    auto w = waiters_.front();
+    waiters_.pop();
+    if (*w.active) {
+      *w.active = false;
+      ctx_.resume(w.handle);
+      return;
+    }
+  }
+  locked_ = false;
+}
 
 }  // namespace rclcpp_async
