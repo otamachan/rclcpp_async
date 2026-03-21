@@ -24,25 +24,22 @@
 #include <utility>
 
 #include "rclcpp_async/cancelled_exception.hpp"
+#include "rclcpp_async/executor.hpp"
 
 namespace rclcpp_async
 {
 
-class CoContext;
-
-using StopCb = std::stop_callback<std::function<void()>>;
-
 template <typename T>
 class Channel
 {
-  CoContext & ctx_;
+  Executor & ctx_;
   std::mutex mutex_;
   std::queue<T> queue_;
   std::coroutine_handle<> waiter_;
   bool closed_ = false;
 
 public:
-  explicit Channel(CoContext & ctx) : ctx_(ctx) {}
+  explicit Channel(Executor & ctx) : ctx_(ctx) {}
 
   void send(T value);
   void close();
@@ -86,5 +83,70 @@ public:
 
   NextAwaiter next() { return NextAwaiter{*this, {}, {}, false}; }
 };
+
+template <typename T>
+bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  {
+    std::lock_guard lock(ch.mutex_);
+    if (!ch.queue_.empty() || ch.closed_) {
+      return false;  // don't suspend, data already available
+    }
+    ch.waiter_ = h;
+  }  // release ch.mutex_ before stop_callback to avoid deadlock
+  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
+    std::coroutine_handle<> w;
+    {
+      std::lock_guard lock(ch.mutex_);
+      if (ch.waiter_ != h) {
+        return;
+      }
+      w = ch.waiter_;
+      ch.waiter_ = nullptr;
+    }
+    if (w) {
+      cancelled = true;
+      ch.ctx_.post([w, weak = std::weak_ptr(cb)]() {
+        if (weak.lock()) {
+          w.resume();
+        }
+      });
+    }
+  });
+  return true;
+}
+
+template <typename T>
+void Channel<T>::send(T value)
+{
+  std::coroutine_handle<> w;
+  {
+    std::lock_guard lock(mutex_);
+    if (closed_) {
+      return;
+    }
+    queue_.push(std::move(value));
+    w = waiter_;
+    waiter_ = nullptr;
+  }
+  if (w) {
+    ctx_.post([w]() { w.resume(); });
+  }
+}
+
+template <typename T>
+void Channel<T>::close()
+{
+  std::coroutine_handle<> w;
+  {
+    std::lock_guard lock(mutex_);
+    closed_ = true;
+    w = waiter_;
+    waiter_ = nullptr;
+  }
+  if (w) {
+    ctx_.post([w]() { w.resume(); });
+  }
+}
 
 }  // namespace rclcpp_async

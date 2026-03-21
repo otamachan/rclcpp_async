@@ -29,12 +29,11 @@
 #include <vector>
 
 #include "rclcpp_async/cancelled_exception.hpp"
+#include "rclcpp_async/executor.hpp"
 #include "rclcpp_async/task.hpp"
 
 namespace rclcpp_async
 {
-
-using StopCb = std::stop_callback<std::function<void()>>;
 
 // Map Task<void> -> std::monostate, Task<T> -> T
 template <typename T>

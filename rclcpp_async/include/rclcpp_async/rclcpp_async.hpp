@@ -18,6 +18,7 @@
 #include "rclcpp_async/channel.hpp"
 #include "rclcpp_async/co_context.hpp"
 #include "rclcpp_async/event.hpp"
+#include "rclcpp_async/executor.hpp"
 #include "rclcpp_async/goal_context.hpp"
 #include "rclcpp_async/goal_stream.hpp"
 #include "rclcpp_async/mutex.hpp"

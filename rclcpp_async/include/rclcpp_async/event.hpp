@@ -23,17 +23,14 @@
 #include <utility>
 
 #include "rclcpp_async/cancelled_exception.hpp"
+#include "rclcpp_async/executor.hpp"
 
 namespace rclcpp_async
 {
 
-class CoContext;
-
-using StopCb = std::stop_callback<std::function<void()>>;
-
 class Event
 {
-  CoContext & ctx_;
+  Executor & ctx_;
   bool set_ = false;
 
   struct Waiter
@@ -44,7 +41,7 @@ class Event
   std::queue<Waiter> waiters_;
 
 public:
-  explicit Event(CoContext & ctx) : ctx_(ctx) {}
+  explicit Event(Executor & ctx) : ctx_(ctx) {}
 
   bool is_set() const { return set_; }
 
@@ -82,5 +79,28 @@ public:
 
   WaitAwaiter wait() { return WaitAwaiter{*this, {}, {}, nullptr}; }
 };
+
+inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+  active = std::make_shared<bool>(true);
+  event.waiters_.push({h, active});
+  auto a = active;
+  register_cancel(cancel_cb_, token, event.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
+}
+
+inline void Event::set()
+{
+  set_ = true;
+  std::queue<Waiter> pending;
+  pending.swap(waiters_);
+  while (!pending.empty()) {
+    auto w = pending.front();
+    pending.pop();
+    if (*w.active) {
+      *w.active = false;
+      ctx_.resume(w.handle);
+    }
+  }
+}
 
 }  // namespace rclcpp_async

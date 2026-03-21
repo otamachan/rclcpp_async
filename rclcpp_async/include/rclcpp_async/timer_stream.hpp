@@ -23,13 +23,12 @@
 #include <utility>
 
 #include "rclcpp_async/cancelled_exception.hpp"
+#include "rclcpp_async/executor.hpp"
 
 namespace rclcpp_async
 {
 
 class CoContext;
-
-using StopCb = std::stop_callback<std::function<void()>>;
 
 class TimerStream
 {
