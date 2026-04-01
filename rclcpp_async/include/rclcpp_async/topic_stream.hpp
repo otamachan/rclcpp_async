@@ -15,6 +15,7 @@
 #pragma once
 
 #include <coroutine>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -39,12 +40,16 @@ class TopicStream
   std::queue<std::shared_ptr<const MsgT>> queue_;
   std::coroutine_handle<> waiter_;
   typename rclcpp::Subscription<MsgT>::SharedPtr sub_;
+  size_t max_depth_;
   bool closed_ = false;
 
   friend class CoContext;
 
 public:
-  explicit TopicStream(CoContext & ctx) : ctx_(ctx) {}
+  explicit TopicStream(CoContext & ctx, size_t max_depth = kDefaultStreamDepth)
+  : ctx_(ctx), max_depth_(max_depth)
+  {
+  }
 
   struct NextAwaiter
   {

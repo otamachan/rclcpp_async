@@ -15,6 +15,7 @@
 #pragma once
 
 #include <coroutine>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -36,10 +37,14 @@ class Channel
   std::mutex mutex_;
   std::queue<T> queue_;
   std::coroutine_handle<> waiter_;
+  size_t max_depth_;
   bool closed_ = false;
 
 public:
-  explicit Channel(Executor & ctx) : ctx_(ctx) {}
+  explicit Channel(Executor & ctx, size_t max_depth = kDefaultStreamDepth)
+  : ctx_(ctx), max_depth_(max_depth)
+  {
+  }
 
   void send(T value);
   void close();
@@ -126,6 +131,9 @@ void Channel<T>::send(T value)
       return;
     }
     queue_.push(std::move(value));
+    while (queue_.size() > max_depth_) {
+      queue_.pop();
+    }
     w = waiter_;
     waiter_ = nullptr;
   }

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <coroutine>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -61,6 +62,7 @@ class GoalStream
   CoContext & ctx_;
   std::queue<Event> queue_;
   std::coroutine_handle<> waiter_;
+  size_t max_depth_;
   bool completed_ = false;
   WrappedResult final_result_;
   GoalHandlePtr goal_handle_;
@@ -77,6 +79,9 @@ class GoalStream
       completed_ = true;
     }
     queue_.push(std::move(event));
+    while (queue_.size() > max_depth_ && queue_.front().type != Event::Type::kComplete) {
+      queue_.pop();
+    }
     if (waiter_) {
       auto h = waiter_;
       waiter_ = nullptr;
@@ -87,7 +92,10 @@ class GoalStream
   void resume_waiter(std::coroutine_handle<> h);
 
 public:
-  explicit GoalStream(CoContext & ctx) : ctx_(ctx) {}
+  explicit GoalStream(CoContext & ctx, size_t max_depth = kDefaultStreamDepth)
+  : ctx_(ctx), max_depth_(max_depth)
+  {
+  }
 
   struct NextAwaiter
   {
@@ -155,6 +163,7 @@ struct SendGoalAwaiter
   typename rclcpp_action::Client<ActionT>::SharedPtr client;
   typename ActionT::Goal goal;
   std::shared_ptr<GoalStream<ActionT>> stream;
+  size_t max_depth;
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
   Result<std::shared_ptr<GoalStream<ActionT>>> result;
