@@ -183,13 +183,16 @@ public:
   template <typename MsgT>
   std::shared_ptr<TopicStream<MsgT>> subscribe(const std::string & topic, const rclcpp::QoS & qos)
   {
-    auto stream = std::make_shared<TopicStream<MsgT>>(*this);
+    auto stream = std::make_shared<TopicStream<MsgT>>(*this, qos.depth());
     stream->sub_ = node_.template create_subscription<MsgT>(
       topic, qos, [s = stream](std::shared_ptr<const MsgT> msg) {
         if (s->closed_) {
           return;
         }
         s->queue_.push(std::move(msg));
+        while (s->queue_.size() > s->max_depth_) {
+          s->queue_.pop();
+        }
         if (s->waiter_) {
           auto w = s->waiter_;
           s->waiter_ = nullptr;
@@ -201,10 +204,11 @@ public:
 
   template <typename ActionT>
   SendGoalAwaiter<ActionT> send_goal(
-    typename rclcpp_action::Client<ActionT>::SharedPtr client, typename ActionT::Goal goal)
+    typename rclcpp_action::Client<ActionT>::SharedPtr client, typename ActionT::Goal goal,
+    size_t max_depth = kDefaultStreamDepth)
   {
     return SendGoalAwaiter<ActionT>{
-      *this, std::move(client), std::move(goal), nullptr, {}, {}, {}, false, false};
+      *this, std::move(client), std::move(goal), nullptr, max_depth, {}, {}, {}, false, false};
   }
 
   template <typename ServiceT, typename CallbackT>
@@ -441,7 +445,7 @@ void GoalStream<ActionT>::CancelAwaiter::await_suspend(std::coroutine_handle<> h
 template <typename ActionT>
 void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 {
-  stream = std::make_shared<GoalStream<ActionT>>(ctx);
+  stream = std::make_shared<GoalStream<ActionT>>(ctx, max_depth);
 
   typename rclcpp_action::Client<ActionT>::SendGoalOptions options;
 

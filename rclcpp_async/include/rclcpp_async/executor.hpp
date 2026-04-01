@@ -15,12 +15,15 @@
 #pragma once
 
 #include <coroutine>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <stop_token>
 
 namespace rclcpp_async
 {
+
+inline constexpr size_t kDefaultStreamDepth = 10;
 
 using StopCb = std::stop_callback<std::function<void()>>;
 
