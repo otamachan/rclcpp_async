@@ -426,7 +426,9 @@ void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
     [this]() {
       stream.waiter_ = nullptr;
       cancelled = true;
-      if (!stream.completed_ && stream.goal_handle_ && stream.client_) {
+      if (
+        stream.auto_cancel_on_stop_ && !stream.completed_ && stream.goal_handle_ &&
+        stream.client_) {
         stream.client_->async_cancel_goal(stream.goal_handle_);
       }
     });
