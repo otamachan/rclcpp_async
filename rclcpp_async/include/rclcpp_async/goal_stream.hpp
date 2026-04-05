@@ -45,9 +45,9 @@ struct GoalEvent
     kFeedback,
     kComplete
   };
-  Type type;
+  Type type{};
   Feedback feedback;
-  WrappedResult result;
+  WrappedResult result{};
 };
 
 template <typename ActionT>
