@@ -64,6 +64,7 @@ class GoalStream
   std::coroutine_handle<> waiter_;
   size_t max_depth_;
   bool completed_ = false;
+  bool auto_cancel_on_stop_ = true;
   WrappedResult final_result_;
   GoalHandlePtr goal_handle_;
   ActionClientPtr client_;
@@ -152,6 +153,8 @@ public:
   };
 
   CancelAwaiter cancel_goal() { return CancelAwaiter{*this, nullptr}; }
+
+  void set_auto_cancel_on_stop(bool v) { auto_cancel_on_stop_ = v; }
 
   WrappedResult result() const { return final_result_; }
 };
