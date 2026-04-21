@@ -170,6 +170,34 @@ Task<void> send_action(CoContext & ctx)
 }
 ```
 
+`GoalStream` provides:
+
+| Method | Description |
+|---|---|
+| `stream->next()` | `co_await` -- yields the next feedback (`nullopt` when the goal completes) |
+| `stream->result()` | Access the final `WrappedResult` after the stream ends |
+| `stream->cancel_goal()` | `co_await` -- request server-side cancellation and receive the response |
+| `stream->set_auto_cancel_on_stop(bool)` | Toggle auto-cancelling the goal when the awaiting task is cancelled (default: `true`) |
+
+#### Feedback queue depth
+
+The feedback queue is bounded -- when it overflows, the oldest feedback is dropped (the final completion event is always preserved). The default depth is 10; pass a third argument to override:
+
+```cpp
+auto goal_result = co_await ctx.send_goal<Fibonacci>(client, goal, /*max_depth=*/32);
+```
+
+#### Auto-cancel on task cancel
+
+If the awaiting task is cancelled while `co_await stream->next()` is suspended, the in-flight goal is automatically cancelled server-side (fire-and-forget `async_cancel_goal`) so the server does not waste work producing a result no one is listening for. Call `stream->set_auto_cancel_on_stop(false)` to opt out -- for example, if you want the goal to keep running in the background after the client gives up.
+
+To request cancellation explicitly and wait for the server's response, use `cancel_goal()`:
+
+```cpp
+auto resp = co_await stream->cancel_goal();
+// resp->return_code indicates whether the server accepted the cancel request
+```
+
 ### Action Server
 
 `ctx.create_action_server<ActionT>(name, callback)` creates an action server with a coroutine handler. Use `GoalContext` to check for cancellation and publish feedback.

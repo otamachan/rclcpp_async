@@ -12,7 +12,7 @@
 | `wait_for_service(client, timeout)` | *awaitable* `Result<void>` | Wait for a service |
 | `send_request<SrvT>(client, req)` | *awaitable* `Response` | Call a service |
 | `wait_for_action(client, timeout)` | *awaitable* `Result<void>` | Wait for an action server |
-| `send_goal<ActT>(client, goal)` | *awaitable* `Result<shared_ptr<GoalStream>>` | Send an action goal |
+| `send_goal<ActT>(client, goal, max_depth = 10)` | *awaitable* `Result<shared_ptr<GoalStream>>` | Send an action goal (feedback queue bounded to `max_depth`) |
 | `sleep(duration)` | *awaitable* `void` | Async sleep |
 | `poll_until(pred, interval, timeout)` | `Task<Result<void>>` | Poll until predicate is true or timeout |
 | `wait_for(awaitable, timeout)` | `Task<Result<T>>` | Race an awaitable against a timeout |
@@ -53,6 +53,17 @@
 | `is_canceling()` | `bool` | Check if cancellation was requested |
 | `publish_feedback(fb)` | `void` | Send feedback to the client |
 | `abort()` | `void` | Abort the goal |
+
+## GoalStream
+
+Returned by `send_goal`. Yields feedback messages and holds the final result.
+
+| Method | Returns | Description |
+|---|---|---|
+| `next()` | *awaitable* `optional<Feedback>` | Next feedback (`nullopt` when goal completes) |
+| `result()` | `WrappedResult` | Final result after the stream ends |
+| `cancel_goal()` | *awaitable* `CancelResponse::SharedPtr` | Request server-side cancellation and await the response |
+| `set_auto_cancel_on_stop(bool)` | `void` | Enable/disable auto-cancelling the in-flight goal when the awaiting task is cancelled (default: `true`) |
 
 ## Event
 
