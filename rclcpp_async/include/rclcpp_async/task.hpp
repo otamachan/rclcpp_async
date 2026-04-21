@@ -145,6 +145,7 @@ struct Task
   {
     if (this != &o) {
       if (handle) {
+        handle.promise().stop_source.request_stop();
         handle.destroy();
       }
       handle = o.handle;
@@ -264,6 +265,7 @@ struct Task<void>
   {
     if (this != &o) {
       if (handle) {
+        handle.promise().stop_source.request_stop();
         handle.destroy();
       }
       handle = o.handle;
