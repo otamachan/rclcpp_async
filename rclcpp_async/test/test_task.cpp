@@ -312,3 +312,50 @@ TEST(TaskVoid, OperatorBoolAndDone)
   EXPECT_TRUE(static_cast<bool>(task2));
   EXPECT_TRUE(task2.done());
 }
+
+TEST(TaskT, MoveAssignRequestsStop)
+{
+  auto task = returns_42();
+  // Capture a token (not a reference to stop_source) so the shared stop-state
+  // outlives the coroutine frame destruction in move-assign.
+  auto token = task.handle.promise().stop_source.get_token();
+  EXPECT_FALSE(token.stop_requested());
+
+  // Move-assign with empty Task should request_stop on the old handle.
+  task = Task<int>{};
+  EXPECT_TRUE(token.stop_requested());
+}
+
+TEST(TaskVoid, MoveAssignRequestsStop)
+{
+  auto task = does_nothing();
+  auto token = task.handle.promise().stop_source.get_token();
+  EXPECT_FALSE(token.stop_requested());
+
+  task = Task<void>{};
+  EXPECT_TRUE(token.stop_requested());
+}
+
+TEST(TaskT, MoveAssignStopCallbackFires)
+{
+  bool callback_fired = false;
+  auto task = returns_42();
+  auto token = task.handle.promise().stop_source.get_token();
+  std::stop_callback cb(token, [&]() { callback_fired = true; });
+
+  EXPECT_FALSE(callback_fired);
+  task = Task<int>{};
+  EXPECT_TRUE(callback_fired);
+}
+
+TEST(TaskVoid, MoveAssignStopCallbackFires)
+{
+  bool callback_fired = false;
+  auto task = does_nothing();
+  auto token = task.handle.promise().stop_source.get_token();
+  std::stop_callback cb(token, [&]() { callback_fired = true; });
+
+  EXPECT_FALSE(callback_fired);
+  task = Task<void>{};
+  EXPECT_TRUE(callback_fired);
+}
