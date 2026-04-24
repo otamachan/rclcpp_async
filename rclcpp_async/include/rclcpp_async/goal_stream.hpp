@@ -162,24 +162,33 @@ public:
 template <typename ActionT>
 struct SendGoalAwaiter
 {
+  // Mutable state is held via shared_ptr so that callbacks registered on
+  // the rclcpp_action::Client (notably goal_response_callback) can safely
+  // observe `done` even if the awaiter (and its coroutine frame) has been
+  // destroyed after the awaiting coroutine was cancelled before the goal
+  // response arrived.
+  struct State
+  {
+    bool done = false;
+    bool cancelled = false;
+    std::shared_ptr<GoalStream<ActionT>> stream;
+    Result<std::shared_ptr<GoalStream<ActionT>>> result;
+  };
+
   CoContext & ctx;
   typename rclcpp_action::Client<ActionT>::SharedPtr client;
   typename ActionT::Goal goal;
-  std::shared_ptr<GoalStream<ActionT>> stream;
   size_t max_depth;
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
-  Result<std::shared_ptr<GoalStream<ActionT>>> result;
-  bool done = false;
-
-  bool cancelled = false;
+  std::shared_ptr<State> state_;
 
   void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready()
   {
     if (token.stop_requested()) {
-      cancelled = true;
+      state_->cancelled = true;
       return true;
     }
     return false;
@@ -190,10 +199,10 @@ struct SendGoalAwaiter
   Result<std::shared_ptr<GoalStream<ActionT>>> await_resume()
   {
     cancel_cb_.reset();
-    if (cancelled) {
+    if (state_->cancelled) {
       throw CancelledException{};
     }
-    return std::move(result);
+    return std::move(state_->result);
   }
 };
 
