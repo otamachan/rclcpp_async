@@ -107,6 +107,9 @@ if(BUILD_TESTING)
   ament_add_ros_isolated_gtest(test_goal_stream test/test_goal_stream.cpp)
   target_link_libraries(test_goal_stream ${PROJECT_NAME} ${example_interfaces_TARGETS})
 
+  ament_add_ros_isolated_gtest(test_send_goal_cancel test/test_send_goal_cancel.cpp)
+  target_link_libraries(test_send_goal_cancel ${PROJECT_NAME} ${example_interfaces_TARGETS})
+
   ament_add_ros_isolated_gtest(test_create_service test/test_create_service.cpp)
   target_link_libraries(test_create_service ${PROJECT_NAME} ${std_srvs_TARGETS})
 

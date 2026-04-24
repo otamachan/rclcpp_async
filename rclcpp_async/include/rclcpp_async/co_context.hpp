@@ -164,7 +164,12 @@ public:
     typename ServiceT::Request::SharedPtr request)
   {
     return SendRequestAwaiter<ServiceT>{
-      *this, std::move(client), std::move(request), {}, {}, {}, false, false};
+      *this,
+      std::move(client),
+      std::move(request),
+      {},
+      {},
+      std::make_shared<typename SendRequestAwaiter<ServiceT>::State>()};
   }
 
   SleepAwaiter sleep(std::chrono::nanoseconds duration)
@@ -208,7 +213,13 @@ public:
     size_t max_depth = kDefaultStreamDepth)
   {
     return SendGoalAwaiter<ActionT>{
-      *this, std::move(client), std::move(goal), nullptr, max_depth, {}, {}, {}, false, false};
+      *this,
+      std::move(client),
+      std::move(goal),
+      max_depth,
+      {},
+      {},
+      std::make_shared<typename SendGoalAwaiter<ActionT>::State>()};
   }
 
   template <typename ServiceT, typename CallbackT>
@@ -342,21 +353,26 @@ public:
 template <typename ServiceT>
 void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
 {
+  // Capture `state` by value (shared_ptr) so the callback stays valid even
+  // if the awaiter is destroyed (e.g. cancellation) before the response
+  // arrives. When `state->done` is already set by the cancel path, the
+  // response callback bails out before touching the (dangling) handle.
   client->async_send_request(
-    request, [this, h](typename rclcpp::Client<ServiceT>::SharedFuture future) {
-      if (done) {
+    request,
+    [state = state_, &ctx = ctx, h](typename rclcpp::Client<ServiceT>::SharedFuture future) {
+      if (state->done) {
         return;
       }
-      done = true;
-      response = future.get();
+      state->done = true;
+      state->response = future.get();
       ctx.resume(h);
     });
 
   register_cancel(
-    cancel_cb_, token, ctx, h, [this]() { return done; },
-    [this]() {
-      done = true;
-      cancelled = true;
+    cancel_cb_, token, ctx, h, [state = state_]() { return state->done; },
+    [state = state_]() {
+      state->done = true;
+      state->cancelled = true;
     });
 }
 
@@ -447,51 +463,58 @@ void GoalStream<ActionT>::CancelAwaiter::await_suspend(std::coroutine_handle<> h
 template <typename ActionT>
 void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 {
-  stream = std::make_shared<GoalStream<ActionT>>(ctx, max_depth);
+  state_->stream = std::make_shared<GoalStream<ActionT>>(ctx, max_depth);
 
   typename rclcpp_action::Client<ActionT>::SendGoalOptions options;
 
-  options.feedback_callback = [s = stream](auto, const auto & feedback) {
+  options.feedback_callback = [s = state_->stream](auto, const auto & feedback) {
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kFeedback;
     event.feedback = feedback;
     s->push(std::move(event));
   };
 
-  options.result_callback = [s = stream](const auto & wrapped_result) {
+  options.result_callback = [s = state_->stream](const auto & wrapped_result) {
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kComplete;
     event.result = wrapped_result;
     s->push(std::move(event));
   };
 
-  options.goal_response_callback = [this, h](const auto & goal_handle) {
-    if (done) {
+  // Capture `state` by value (shared_ptr) so the callback stays valid even
+  // if the awaiter is destroyed before goal_response arrives (e.g. the
+  // awaiting coroutine was cancelled between async_send_goal() and the
+  // server's accept/reject). When `state->done` is already set by the
+  // cancel path, the callback bails out before touching the (dangling)
+  // coroutine handle.
+  options.goal_response_callback = [state = state_, client = client, &ctx = ctx,
+                                    h](const auto & goal_handle) {
+    if (state->done) {
       return;
     }
-    done = true;
+    state->done = true;
     if (!goal_handle) {
-      result = Result<std::shared_ptr<GoalStream<ActionT>>>::Error("goal rejected");
+      state->result = Result<std::shared_ptr<GoalStream<ActionT>>>::Error("goal rejected");
     } else {
-      stream->goal_handle_ = goal_handle;
-      stream->client_ = client;
-      result = Result<std::shared_ptr<GoalStream<ActionT>>>::Ok(stream);
+      state->stream->goal_handle_ = goal_handle;
+      state->stream->client_ = client;
+      state->result = Result<std::shared_ptr<GoalStream<ActionT>>>::Ok(state->stream);
     }
     // Use post() instead of resume() to defer coroutine resumption.
     // rclcpp_action holds goal_requests_mutex during this callback
     // (Jazzy bug: https://github.com/ros2/rclcpp/issues/2796).
     // Resuming synchronously here would deadlock if the coroutine
     // immediately calls async_send_goal again.
-    ctx.post([&ctx = ctx, h]() { ctx.resume(h); });
+    ctx.post([&ctx, h]() { ctx.resume(h); });
   };
 
   client->async_send_goal(goal, options);
 
   register_cancel(
-    cancel_cb_, token, ctx, h, [this]() { return done; },
-    [this]() {
-      done = true;
-      cancelled = true;
+    cancel_cb_, token, ctx, h, [state = state_]() { return state->done; },
+    [state = state_]() {
+      state->done = true;
+      state->cancelled = true;
     });
 }
 
