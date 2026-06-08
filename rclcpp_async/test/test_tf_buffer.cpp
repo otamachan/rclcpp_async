@@ -14,16 +14,10 @@
 
 #include <gtest/gtest.h>
 
-#ifdef TF2_ROS_VERSION_GTE_0_45
-#include <tf2_ros/static_transform_broadcaster.hpp>
-#include <tf2_ros/transform_broadcaster.hpp>
-#else
-#include <tf2_ros/static_transform_broadcaster.h>
-#include <tf2_ros/transform_broadcaster.h>
-#endif
-
 #include <chrono>
 #include <rclcpp/rclcpp.hpp>
+#include <tf2_ros/static_transform_broadcaster.hpp>
+#include <tf2_ros/transform_broadcaster.hpp>
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
