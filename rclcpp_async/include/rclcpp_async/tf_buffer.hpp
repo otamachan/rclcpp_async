@@ -59,9 +59,11 @@ public:
   explicit TfBuffer(CoContext & ctx)
   : ctx_(ctx),
     tf_node_(std::make_shared<rclcpp::Node>(
-      "_tf_listener", ctx.node().get_namespace(),
-      rclcpp::NodeOptions().start_parameter_services(false).start_parameter_event_publisher(
-        false))),
+      std::string(ctx.node().get_name()) + "_tf_listener", ctx.node().get_namespace(),
+      rclcpp::NodeOptions()
+        .use_global_arguments(false)
+        .start_parameter_services(false)
+        .start_parameter_event_publisher(false))),
     buffer_(std::make_shared<tf2_ros::Buffer>(ctx.node().get_clock()))
   {
     auto cb = [this](tf2_msgs::msg::TFMessage::ConstSharedPtr msg) {
