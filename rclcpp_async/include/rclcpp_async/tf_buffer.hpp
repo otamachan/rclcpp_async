@@ -58,11 +58,10 @@ public:
 
   explicit TfBuffer(CoContext & ctx)
   : ctx_(ctx),
-    tf_node_(std::make_shared<rclcpp::Node>(
-      "_tf_listener", ctx.node().get_namespace(),
-      rclcpp::NodeOptions().start_parameter_services(false).start_parameter_event_publisher(
-        false))),
-    buffer_(std::make_shared<tf2_ros::Buffer>(ctx.node().get_clock()))
+    buffer_(std::make_shared<tf2_ros::Buffer>(ctx.node().get_clock())),
+    callback_group_(ctx.node().create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive,
+      /*automatically_add_to_executor_with_node=*/false))
   {
     auto cb = [this](tf2_msgs::msg::TFMessage::ConstSharedPtr msg) {
       on_tf_message(std::move(msg), false);
@@ -70,12 +69,18 @@ public:
     auto static_cb = [this](tf2_msgs::msg::TFMessage::ConstSharedPtr msg) {
       on_tf_message(std::move(msg), true);
     };
-    sub_tf_ = tf_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-      "/tf", tf2_ros::DynamicListenerQoS(), std::move(cb));
-    sub_tf_static_ = tf_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-      "/tf_static", tf2_ros::StaticListenerQoS(), std::move(static_cb));
+    rclcpp::SubscriptionOptions options;
+    options.callback_group = callback_group_;
+    sub_tf_ = ctx.node().create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf", tf2_ros::DynamicListenerQoS(), std::move(cb), options);
+    sub_tf_static_ = ctx.node().create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf_static", tf2_ros::StaticListenerQoS(), std::move(static_cb), options);
 
-    tf_executor_.add_node(tf_node_);
+    // Spin only the TF callback group on a dedicated executor/thread, so TF
+    // keeps flowing even when the host node's executor is busy. This mirrors
+    // tf2_ros::TransformListener(spin_thread=true) and avoids creating a
+    // second node.
+    tf_executor_.add_callback_group(callback_group_, ctx.node().get_node_base_interface());
     tf_thread_ = std::thread([this]() { tf_executor_.spin(); });
   }
 
@@ -213,8 +218,8 @@ private:
 
   CoContext & ctx_;
 
-  rclcpp::Node::SharedPtr tf_node_;
   std::shared_ptr<tf2_ros::Buffer> buffer_;
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
 
   rclcpp::executors::SingleThreadedExecutor tf_executor_;
   std::thread tf_thread_;
