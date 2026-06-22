@@ -14,14 +14,6 @@
 
 #pragma once
 
-#ifdef TF2_ROS_VERSION_GTE_0_45
-#include <tf2_ros/buffer.hpp>
-#include <tf2_ros/buffer_interface.hpp>
-#else
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/buffer_interface.h>
-#endif
-
 #include <coroutine>
 #include <functional>
 #include <geometry_msgs/msg/transform_stamped.hpp>
@@ -32,6 +24,8 @@
 #include <stop_token>
 #include <string>
 #include <tf2_msgs/msg/tf_message.hpp>
+#include <tf2_ros/buffer.hpp>
+#include <tf2_ros/buffer_interface.hpp>
 #include <tf2_ros/qos.hpp>
 #include <thread>
 #include <utility>
