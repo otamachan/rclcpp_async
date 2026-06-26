@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ros_distro: [jazzy, rolling]
+        ros_distro: [jazzy, lyrical, rolling]
         build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
