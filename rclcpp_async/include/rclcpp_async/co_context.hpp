@@ -87,9 +87,15 @@ public:
 
   std::shared_ptr<void> take_data_by_entity_id(size_t) override { return nullptr; }
 
-  void set_on_ready_callback(std::function<void(size_t, int)>) override {}
+  void set_on_ready_callback(std::function<void(size_t, int)> callback) override
+  {
+    // Events-based executors only learn this waitable is ready via this
+    // callback, not by polling the wait set. Forward guard condition triggers.
+    // GuardCondition replays triggers raced ahead of registration, so no loss.
+    gc_.set_on_trigger_callback([callback](size_t count) { callback(count, 0); });
+  }
 
-  void clear_on_ready_callback() override {}
+  void clear_on_ready_callback() override { gc_.set_on_trigger_callback(nullptr); }
 
 #if RCLCPP_VERSION_GTE(30, 0, 0)
   std::vector<std::shared_ptr<rclcpp::TimerBase>> get_timers() const override { return {}; }

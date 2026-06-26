@@ -131,6 +131,9 @@ if(BUILD_TESTING)
   ament_add_ros_isolated_gtest(test_chained_goals test/test_chained_goals.cpp)
   target_link_libraries(test_chained_goals ${PROJECT_NAME} ${example_interfaces_TARGETS})
 
+  ament_add_ros_isolated_gtest(test_events_executor test/test_events_executor.cpp)
+  target_link_libraries(test_events_executor ${PROJECT_NAME} ${example_interfaces_TARGETS})
+
   ament_add_ros_isolated_gtest(test_single_goal_action_server
     test/test_single_goal_action_server.cpp)
   target_link_libraries(test_single_goal_action_server
