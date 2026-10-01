@@ -2,6 +2,8 @@
 
 ## CoContext
 
+`CoContext(node, callback_group = nullptr)` -- everything the context creates (timers, subscriptions, services, action servers and its internal waitable) joins `callback_group`, so coroutines resume in that group. `nullptr` keeps the node's default group. A group that is not `MutuallyExclusive` throws `std::invalid_argument`.
+
 | Method | Returns | Description |
 |---|---|---|
 | `create_task(task)` | `Task<T>` | Start a coroutine |
@@ -18,6 +20,7 @@
 | `wait_for(awaitable, timeout)` | `Task<Result<T>>` | Race an awaitable against a timeout |
 | `post(fn)` | `void` | Post a callback to the executor thread (thread-safe) |
 | `node()` | `Node&` | Access the underlying node |
+| `callback_group()` | `CallbackGroup::SharedPtr` | The group the context creates its entities in |
 
 ## Free Functions
 
