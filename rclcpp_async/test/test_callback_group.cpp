@@ -16,8 +16,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <stdexcept>
 #include <thread>
 
 #include "rclcpp_async/rclcpp_async.hpp"
@@ -48,12 +50,12 @@ protected:
 
   // Every callback of the group runs this; two of them running at once means
   // the group did not serialize them.
-  void Enter()
+  void Enter(std::chrono::microseconds busy = 200us)
   {
     if (active_.fetch_add(1) != 0) {
       overlapped_ = true;
     }
-    std::this_thread::sleep_for(200us);
+    std::this_thread::sleep_for(busy);
     active_.fetch_sub(1);
   }
 
@@ -68,6 +70,18 @@ protected:
     spinner.join();
   }
 
+  // A member coroutine rather than a capturing lambda: the lambda's closure
+  // would be gone by the time the cancellation resumes the frame.
+  Task<void> SleepUntilCancelled(std::atomic<int> & cancelled)
+  {
+    try {
+      co_await ctx_->sleep(10s);
+    } catch (const CancelledException &) {
+      Enter();
+      ++cancelled;
+    }
+  }
+
   rclcpp::Node::SharedPtr node_;
   rclcpp::CallbackGroup::SharedPtr group_;
   std::unique_ptr<CoContext> ctx_;
@@ -78,11 +92,38 @@ protected:
 
 TEST_F(CallbackGroupTest, ContextReportsItsGroup) { EXPECT_EQ(ctx_->callback_group(), group_); }
 
+TEST_F(CallbackGroupTest, ReentrantGroupIsRejected)
+{
+  auto reentrant = node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  EXPECT_THROW(CoContext(*node_, reentrant), std::invalid_argument);
+}
+
+// Negative control: the check below can see an overlap at all. A context left
+// on the default group runs beside a timer of group_ on this executor.
+TEST_F(CallbackGroupTest, DefaultGroupContextOverlapsWithAnotherGroup)
+{
+  CoContext default_ctx(*node_);
+  auto timer = node_->create_wall_timer(1ms, [this]() { Enter(1ms); }, group_);
+  std::atomic<bool> done{false};
+  auto body = [this, &default_ctx, &done]() -> Task<void> {
+    for (int i = 0; i < 2000 && !overlapped_; ++i) {
+      co_await default_ctx.sleep(1ms);
+      Enter(1ms);
+    }
+    done = true;
+  };
+  auto task = default_ctx.create_task(body());
+
+  SpinUntil(done);
+  EXPECT_TRUE(done);
+  EXPECT_TRUE(overlapped_);
+}
+
 TEST_F(CallbackGroupTest, CoroutineResumesSerializedWithItsGroup)
 {
   auto timer = node_->create_wall_timer(1ms, [this]() { Enter(); }, group_);
   std::atomic<bool> done{false};
-  auto task = ctx_->create_task([this, &done]() -> Task<void> {
+  auto body = [this, &done]() -> Task<void> {
     for (int i = 0; i < 200; ++i) {
       co_await ctx_->sleep(1ms);
       Enter();
@@ -93,7 +134,8 @@ TEST_F(CallbackGroupTest, CoroutineResumesSerializedWithItsGroup)
       Enter();
     }
     done = true;
-  });
+  };
+  auto task = ctx_->create_task(body());
 
   SpinUntil(done);
   EXPECT_TRUE(done);
@@ -132,6 +174,66 @@ TEST_F(CallbackGroupTest, ServiceHandlerRunsInTheGroup)
 
   SpinUntil(done);
   caller.join();
+  EXPECT_EQ(answered, 50);
+  EXPECT_FALSE(overlapped_);
+}
+
+TEST_F(CallbackGroupTest, CancelledCoroutineResumesInItsGroup)
+{
+  auto timer = node_->create_wall_timer(1ms, [this]() { Enter(); }, group_);
+  std::atomic<int> cancelled{0};
+  std::atomic<bool> done{false};
+  auto body = [this, &cancelled, &done]() -> Task<void> {
+    for (int i = 0; i < 50; ++i) {
+      auto sleeper = ctx_->create_task(SleepUntilCancelled(cancelled));
+      co_await ctx_->sleep(1ms);
+      sleeper.cancel();
+      while (!sleeper.done()) {
+        co_await ctx_->sleep(1ms);
+      }
+    }
+    done = true;
+  };
+  auto task = ctx_->create_task(body());
+
+  SpinUntil(done);
+  EXPECT_TRUE(done);
+  EXPECT_EQ(cancelled, 50);
+  EXPECT_FALSE(overlapped_);
+}
+
+TEST_F(CallbackGroupTest, ResponseToAClientOfTheGroupResumesInIt)
+{
+  auto timer = node_->create_wall_timer(1ms, [this]() { Enter(); }, group_);
+  auto server_group = node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto service = node_->create_service<std_srvs::srv::Trigger>(
+    "test_callback_group_peer",
+    [](
+      std_srvs::srv::Trigger::Request::SharedPtr, std_srvs::srv::Trigger::Response::SharedPtr res) {
+      res->success = true;
+    },
+    rclcpp::ServicesQoS(), server_group);
+  auto client = node_->create_client<std_srvs::srv::Trigger>(
+    "test_callback_group_peer", rclcpp::ServicesQoS(), group_);
+
+  std::atomic<int> answered{0};
+  std::atomic<bool> done{false};
+  auto body = [this, client, &answered, &done]() -> Task<void> {
+    co_await ctx_->wait_for_service(client, 5s);
+    for (int i = 0; i < 50; ++i) {
+      auto response = co_await ctx_->send_request<std_srvs::srv::Trigger>(
+        client, std::make_shared<std_srvs::srv::Trigger::Request>());
+      Enter();
+      if (response->success) {
+        ++answered;
+      }
+    }
+    done = true;
+  };
+  auto task = ctx_->create_task(body());
+
+  SpinUntil(done);
+  EXPECT_TRUE(done);
   EXPECT_EQ(answered, 50);
   EXPECT_FALSE(overlapped_);
 }

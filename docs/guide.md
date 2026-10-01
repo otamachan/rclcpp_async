@@ -391,12 +391,18 @@ Task<void> critical_section(CoContext & ctx, Mutex & mutex, const std::string & 
 
 ### Multi-threaded executors
 
-On a `MultiThreadedExecutor`, give the context a `MutuallyExclusive` callback group to keep its coroutines from running concurrently with the other callbacks of that group. Create the clients you `co_await` in the same group: a response resumes the coroutine in its client's group.
+On a `MultiThreadedExecutor`, give the context a `MutuallyExclusive` callback group to keep its coroutines from running concurrently with the other callbacks of that group. A `Reentrant` group is rejected: the waiters the context keeps are not thread-safe.
+
+The group only covers what the context creates. Two other kinds of resumption run wherever they are triggered:
+
+- A response, feedback or result resumes the coroutine in its **client's** group, so create the service and action clients you `co_await` in the same group.
+- `Event::set()`, `Mutex::unlock()`, `TopicStream::close()` and `create_task()` resume the waiting coroutine on the **calling** thread, so call them from that group too.
 
 ```cpp
 auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 rclcpp_async::CoContext ctx(*node, group);
 auto client = node->create_client<std_srvs::srv::Trigger>("trigger", rclcpp::ServicesQoS(), group);
+auto action_client = rclcpp_action::create_client<Fibonacci>(node, "fibonacci", group);
 auto service = node->create_service<std_srvs::srv::Trigger>("state", handler, rclcpp::ServicesQoS(), group);
 ```
 

@@ -26,6 +26,7 @@
 #include <rclcpp/detail/add_guard_condition_to_rcl_wait_set.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <type_traits>
@@ -134,12 +135,20 @@ class CoContext : public Executor
 public:
   // Everything the context creates (its drain waitable, timers, subscriptions,
   // services and action servers) joins callback_group, so coroutines resume
-  // in that group. nullptr keeps the node's default group. Clients passed to
-  // send_request / send_goal resume in their own group, so put them in the
-  // same one to serialize a coroutine with the rest of that group.
+  // in that group. nullptr keeps the node's default group. The group must be
+  // MutuallyExclusive: the waiters the context keeps are not thread-safe.
+  //
+  // Clients passed to send_request / send_goal resume in their own group, and
+  // Event::set, Mutex::unlock, TopicStream::close and create_task resume on
+  // the calling thread, so call or create those from the same group to keep
+  // a coroutine serialized with the rest of it.
   explicit CoContext(rclcpp::Node & node, rclcpp::CallbackGroup::SharedPtr callback_group = nullptr)
   : node_(node), callback_group_(std::move(callback_group))
   {
+    if (
+      callback_group_ && callback_group_->type() != rclcpp::CallbackGroupType::MutuallyExclusive) {
+      throw std::invalid_argument("CoContext needs a MutuallyExclusive callback group");
+    }
     drain_ = std::make_shared<DrainWaitable>();
     node_.get_node_waitables_interface()->add_waitable(drain_, callback_group_);
   }
