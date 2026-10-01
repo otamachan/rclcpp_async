@@ -389,6 +389,17 @@ Task<void> critical_section(CoContext & ctx, Mutex & mutex, const std::string & 
 | `mutex.unlock()` | Release the lock, resuming the next waiter |
 | `mutex.is_locked()` | Check the current state |
 
+### Multi-threaded executors
+
+On a `MultiThreadedExecutor`, give the context a `MutuallyExclusive` callback group to keep its coroutines from running concurrently with the other callbacks of that group. Create the clients you `co_await` in the same group: a response resumes the coroutine in its client's group.
+
+```cpp
+auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+rclcpp_async::CoContext ctx(*node, group);
+auto client = node->create_client<std_srvs::srv::Trigger>("trigger", rclcpp::ServicesQoS(), group);
+auto service = node->create_service<std_srvs::srv::Trigger>("state", handler, rclcpp::ServicesQoS(), group);
+```
+
 ### Channel
 
 `Channel<T>` is a thread-safe MPSC (multi-producer, single-consumer) channel for sending values from worker threads to coroutines.

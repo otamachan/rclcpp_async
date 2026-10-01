@@ -122,12 +122,26 @@ class CoContext : public Executor
 {
   std::shared_ptr<DrainWaitable> drain_;
   rclcpp::Node & node_;
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
+
+  rclcpp::SubscriptionOptions subscription_options() const
+  {
+    rclcpp::SubscriptionOptions options;
+    options.callback_group = callback_group_;
+    return options;
+  }
 
 public:
-  explicit CoContext(rclcpp::Node & node) : node_(node)
+  // Everything the context creates (its drain waitable, timers, subscriptions,
+  // services and action servers) joins callback_group, so coroutines resume
+  // in that group. nullptr keeps the node's default group. Clients passed to
+  // send_request / send_goal resume in their own group, so put them in the
+  // same one to serialize a coroutine with the rest of that group.
+  explicit CoContext(rclcpp::Node & node, rclcpp::CallbackGroup::SharedPtr callback_group = nullptr)
+  : node_(node), callback_group_(std::move(callback_group))
   {
     drain_ = std::make_shared<DrainWaitable>();
-    node_.get_node_waitables_interface()->add_waitable(drain_, nullptr);
+    node_.get_node_waitables_interface()->add_waitable(drain_, callback_group_);
   }
 
   CoContext(const CoContext &) = delete;
@@ -140,6 +154,8 @@ public:
   void resume(std::coroutine_handle<> h) override { h.resume(); }
 
   rclcpp::Node & node() { return node_; }
+
+  rclcpp::CallbackGroup::SharedPtr callback_group() const { return callback_group_; }
 
   template <typename T>
   [[nodiscard]] Task<T> create_task(Task<T> task)
@@ -196,7 +212,8 @@ public:
   {
     auto stream = std::make_shared<TopicStream<MsgT>>(*this, qos.depth());
     stream->sub_ = node_.template create_subscription<MsgT>(
-      topic, qos, [s = stream](std::shared_ptr<const MsgT> msg) {
+      topic, qos,
+      [s = stream](std::shared_ptr<const MsgT> msg) {
         if (s->closed_) {
           return;
         }
@@ -209,7 +226,8 @@ public:
           s->waiter_ = nullptr;
           s->ctx_.resume(w);
         }
-      });
+      },
+      subscription_options());
     return stream;
   }
 
@@ -247,24 +265,28 @@ public:
           srv->send_response(*req_id, response);
         }(cb, std::move(service_handle), std::move(request_id), std::move(request));
       };
-    return node_.template create_service<ServiceT>(name, std::move(handler));
+    return node_.template create_service<ServiceT>(
+      name, std::move(handler), rclcpp::ServicesQoS(), callback_group_);
   }
 
   std::shared_ptr<TimerStream> create_timer(std::chrono::nanoseconds period)
   {
     auto stream = std::make_shared<TimerStream>(*this);
-    stream->timer_ = node_.create_wall_timer(period, [s = stream, this]() {
-      if (s->closed_) {
-        return;
-      }
-      if (s->waiter_) {
-        auto w = s->waiter_;
-        s->waiter_ = nullptr;
-        resume(w);
-      } else {
-        s->pending_++;
-      }
-    });
+    stream->timer_ = node_.create_wall_timer(
+      period,
+      [s = stream, this]() {
+        if (s->closed_) {
+          return;
+        }
+        if (s->waiter_) {
+          auto w = s->waiter_;
+          s->waiter_ = nullptr;
+          resume(w);
+        } else {
+          s->pending_++;
+        }
+      },
+      callback_group_);
     return stream;
   }
 
@@ -338,7 +360,8 @@ public:
             }
           }
         }(cb, goal_handle);
-      });
+      },
+      rcl_action_server_get_default_options(), callback_group_);
   }
 
   template <typename ActionT, typename CallbackT>
@@ -393,7 +416,7 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
     ctx.resume(h);
   };
 
-  timer = ctx.node().create_wall_timer(duration, [finish]() { finish(); });
+  timer = ctx.node().create_wall_timer(duration, [finish]() { finish(); }, ctx.callback_group());
 
   cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
     if (done) {

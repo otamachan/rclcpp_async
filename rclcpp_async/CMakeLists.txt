@@ -92,6 +92,9 @@ if(BUILD_TESTING)
   ament_add_ros_isolated_gtest(test_sleep test/test_sleep.cpp)
   target_link_libraries(test_sleep ${PROJECT_NAME})
 
+  ament_add_ros_isolated_gtest(test_callback_group test/test_callback_group.cpp)
+  target_link_libraries(test_callback_group ${PROJECT_NAME} ${std_srvs_TARGETS})
+
   ament_add_ros_isolated_gtest(test_wait_for_service test/test_wait_for_service.cpp)
   target_link_libraries(test_wait_for_service ${PROJECT_NAME} ${std_srvs_TARGETS})
 
