@@ -59,6 +59,16 @@ public:
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
+    std::coroutine_handle<> waiting_{};
+
+    // A frame destroyed while suspended here must not stay registered as the
+    // stream's waiter, or the next message would resume it.
+    ~NextAwaiter()
+    {
+      if (waiting_ && stream.waiter_ == waiting_) {
+        stream.waiter_ = nullptr;
+      }
+    }
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
