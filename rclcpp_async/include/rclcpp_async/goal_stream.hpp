@@ -92,6 +92,14 @@ class GoalStream
 
   void resume_waiter(std::coroutine_handle<> h);
 
+  // The waiting coroutine was stopped: cancel the goal it was following.
+  void cancel_goal_on_stop()
+  {
+    if (auto_cancel_on_stop_ && !completed_ && goal_handle_ && client_) {
+      client_->async_cancel_goal(goal_handle_);
+    }
+  }
+
 public:
   explicit GoalStream(CoContext & ctx, size_t max_depth = kDefaultStreamDepth)
   : ctx_(ctx), max_depth_(max_depth)
@@ -109,11 +117,14 @@ public:
     std::coroutine_handle<> waiting_{};
 
     // A frame destroyed while suspended here must not stay registered as the
-    // stream's waiter, or the next message would resume it.
+    // stream's waiter, or the next message would resume it. Destroying the
+    // task stops it first, and the deferred cancellation no longer runs for a
+    // destroyed awaiter, so the goal is cancelled here instead.
     ~NextAwaiter()
     {
       if (waiting_ && stream.waiter_ == waiting_) {
         stream.waiter_ = nullptr;
+        stream.cancel_goal_on_stop();
       }
     }
 

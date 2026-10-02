@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <example_interfaces/action/fibonacci.hpp>
 #include <memory>
@@ -65,7 +66,10 @@ protected:
       [](const rclcpp_action::GoalUUID &, std::shared_ptr<const Fibonacci::Goal>) {
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
       },
-      [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
+      [this](const std::shared_ptr<GoalHandle>) {
+        cancel_requested_ = true;
+        return rclcpp_action::CancelResponse::ACCEPT;
+      },
       [count, interval_ms](const std::shared_ptr<GoalHandle> goal_handle) {
         std::thread([goal_handle, count, interval_ms]() {
           std::this_thread::sleep_for(200ms);
@@ -107,6 +111,7 @@ protected:
   rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp_action::Client<Fibonacci>::SharedPtr action_client_;
   rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
+  std::atomic<bool> cancel_requested_{false};
 };
 
 TEST_F(TaskDestroyTest, DestroyWhileSuspendedOnTimer)
@@ -190,4 +195,37 @@ TEST_F(TaskDestroyTest, DestroyGoalTaskWhileAwaitingFeedback)
   auto task = ctx_->create_task(coro());
   spin_until_done(task, 15s);
   EXPECT_TRUE(outer_done);
+}
+
+TEST_F(TaskDestroyTest, DestroyingATaskAwaitingFeedbackCancelsTheGoal)
+{
+  create_feedback_server(30, 100);
+  wait_for_server();
+
+  auto follow = [this]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 30;
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    if (!goal_result.ok()) {
+      co_return;
+    }
+    auto stream = *goal_result.value;
+    while (co_await stream->next()) {
+    }
+  };
+  {
+    auto task = ctx_->create_task(follow());
+    auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < deadline) {
+      executor_.spin_some();
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + 2s;
+  while (!cancel_requested_ && std::chrono::steady_clock::now() < deadline) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_TRUE(cancel_requested_);
 }
