@@ -4,7 +4,14 @@
 
 ### create_task
 
-`create_task` registers and starts a coroutine. It accepts either a `Task<T>` directly or a callable that returns one.
+`create_task` schedules a coroutine on the context. It accepts either a `Task<T>` directly or a callable that returns one. The coroutine starts when the executor next runs, not inside `create_task` itself, so tasks start in creation order, after anything scheduled before them.
+
+Note that `task = ctx.create_task(...)` evaluates the right-hand side first: the new task is scheduled before the old one is released. If the old task's unwinding must come first, cancel it first:
+
+```cpp
+task.cancel();
+task = ctx.create_task(next(ctx));  // next() starts after task has unwound
+```
 
 ```cpp
 // From a coroutine function
@@ -458,6 +465,17 @@ Task<void> run(CoContext & ctx)
   }
 }
 ```
+
+### Destroying a running task
+
+Destroying a `Task` (or move-assigning over it) while it is still running cancels it, exactly like `task.cancel()`. The coroutine is not torn down on the spot: it keeps living until the executor resumes it, `CancelledException` unwinds its body, and the frame frees itself. This is what makes it safe to drop a task while it waits on a topic, a service response or an event -- whoever delivers the result still finds a live coroutine.
+
+Two consequences:
+
+- Code that runs during unwinding (destructors of locals, `catch (const CancelledException &)` handlers) runs *after* the owner of the `Task` has moved on. Do not touch anything by reference there that the owner may have destroyed.
+- A task suspended on an awaitable that does not support cancellation (for example a `shield`ed task) lives until that awaitable completes.
+
+A task destroyed before the executor has started it never runs. A task that was never scheduled is simply freed.
 
 ### shield
 

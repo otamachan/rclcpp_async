@@ -244,6 +244,30 @@ TEST_F(TfBufferTest, TransformAfterWaiterDestroyed)
   }
 }
 
+TEST_F(TfBufferTest, TransformThenWaiterDestroyed)
+{
+  auto coro = [&]() -> Task<void> {
+    co_await tf_buffer_->lookup_transform("r", "s", rclcpp::Time(0));
+  };
+  auto broadcaster = make_static_broadcaster(node_);
+  {
+    auto task = ctx_->create_task(coro());
+    // The transform arrives on TfBuffer's own thread, which posts the
+    // resumption; the task is destroyed before executor_ runs it.
+    broadcaster.sendTransform(make_transform("r", "s"));
+    auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!tf_buffer_->lookup_transform("r", "s") && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(10ms);
+    }
+    ASSERT_TRUE(tf_buffer_->lookup_transform("r", "s"));
+    std::this_thread::sleep_for(50ms);
+  }
+  for (int i = 0; i < 5; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(10ms);
+  }
+}
+
 TEST_F(TfBufferTest, MultipleConcurrentLookups)
 {
   geometry_msgs::msg::TransformStamped r1, r2;
