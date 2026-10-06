@@ -204,6 +204,15 @@ struct SendGoalAwaiter
   std::shared_ptr<StopCb> cancel_cb_;
   std::shared_ptr<State> state_;
 
+  // Same as SendRequestAwaiter: the goal response must not resume a frame
+  // destroyed while suspended here.
+  ~SendGoalAwaiter()
+  {
+    if (cancel_cb_) {
+      state_->done = true;
+    }
+  }
+
   void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready()

@@ -52,6 +52,16 @@ public:
     std::shared_ptr<StopCb> cancel_cb_;
     std::shared_ptr<bool> active;
 
+    // A frame destroyed while suspended here must not stay registered, or a
+    // later unlock() would resume it. The deferred cancellation no longer runs
+    // for a destroyed awaiter, so the waiter is withdrawn here.
+    ~LockAwaiter()
+    {
+      if (active) {
+        *active = false;
+      }
+    }
+
     void set_token(std::stop_token t) { token = std::move(t); }
 
     bool await_ready()

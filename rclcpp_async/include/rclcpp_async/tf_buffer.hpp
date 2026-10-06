@@ -111,6 +111,17 @@ public:
     bool cancelled = false;
     std::shared_ptr<PendingRequest> request;
 
+    // A frame destroyed while suspended here must not stay pending, or the
+    // transform's arrival would resume it. The deferred cancellation no longer
+    // runs for a destroyed awaiter, so the request is withdrawn here.
+    ~LookupTransformAwaiter()
+    {
+      if (request && request->active && *request->active) {
+        tf.remove_pending(request);
+        *request->active = false;
+      }
+    }
+
     void set_token(std::stop_token t) { token = std::move(t); }
 
     bool await_ready()
