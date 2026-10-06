@@ -139,9 +139,9 @@ public:
   // MutuallyExclusive: the waiters the context keeps are not thread-safe.
   //
   // Clients passed to send_request / send_goal resume in their own group, and
-  // Event::set, Mutex::unlock, TopicStream::close and create_task resume on
-  // the calling thread, so call or create those from the same group to keep
-  // a coroutine serialized with the rest of it.
+  // Event::set, Mutex::unlock and TopicStream::close resume on the calling
+  // thread, so call those from the same group to keep a coroutine serialized
+  // with the rest of it.
   explicit CoContext(rclcpp::Node & node, rclcpp::CallbackGroup::SharedPtr callback_group = nullptr)
   : node_(node), callback_group_(std::move(callback_group))
   {
@@ -166,11 +166,20 @@ public:
 
   rclcpp::CallbackGroup::SharedPtr callback_group() const { return callback_group_; }
 
+  // The task starts on the executor, not here. Whatever was posted before it
+  // -- the cancellation of the task it replaces, say -- runs first, and a
+  // task released before its start (see Task::release) never runs.
   template <typename T>
   [[nodiscard]] Task<T> create_task(Task<T> task)
   {
     task.started_ = true;
-    task.handle.resume();
+    post([h = task.handle]() {
+      if (h.promise().detached) {
+        h.destroy();
+        return;
+      }
+      h.resume();
+    });
     return task;
   }
 
@@ -449,7 +458,6 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 template <typename MsgT>
 void TopicStream<MsgT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  waiting_ = h;
   stream.waiter_ = h;
   register_cancel(
     cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
@@ -479,7 +487,6 @@ void GoalStream<ActionT>::resume_waiter(std::coroutine_handle<> h)
 template <typename ActionT>
 void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  waiting_ = h;
   stream.waiter_ = h;
   register_cancel(
     cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },

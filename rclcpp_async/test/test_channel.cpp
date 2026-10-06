@@ -263,3 +263,31 @@ TEST_F(ChannelTest, CancelFromThread)
   ASSERT_TRUE(running.handle.done());
   EXPECT_TRUE(was_cancelled);
 }
+
+TEST_F(ChannelTest, SendThenWaiterDestroyed)
+{
+  Channel<int> ch(*ctx_);
+  auto coro = [&]() -> Task<void> { co_await ch.next(); };
+  {
+    auto task = ctx_->create_task(coro());
+    ch.send(1);  // posts the resumption, destroyed before it runs
+  }
+  for (int i = 0; i < 5; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+}
+
+TEST_F(ChannelTest, CloseThenWaiterDestroyed)
+{
+  Channel<int> ch(*ctx_);
+  auto coro = [&]() -> Task<void> { co_await ch.next(); };
+  {
+    auto task = ctx_->create_task(coro());
+    ch.close();  // posts the resumption, destroyed before it runs
+  }
+  for (int i = 0; i < 5; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+}

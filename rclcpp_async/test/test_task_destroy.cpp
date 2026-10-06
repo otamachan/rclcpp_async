@@ -21,6 +21,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <vector>
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
@@ -313,4 +314,126 @@ TEST_F(TaskDestroyTest, ResponseAfterRequesterDestroyed)
   AddTwoInts::Response response;
   service->send_response(*pending_header, response);
   spin_for(200ms);
+}
+
+// Destroying a running task does not destroy its frame: the task is cancelled
+// and unwinds on the executor, so whatever holds its handle may still resume it.
+
+TEST_F(TaskDestroyTest, DestroyedTaskUnwindsOnTheExecutor)
+{
+  auto guard = std::make_shared<int>(0);
+  auto hold = [this](std::shared_ptr<int> g) -> Task<void> {
+    co_await ctx_->sleep(10s);
+    (void)g;
+  };
+  {
+    auto task = ctx_->create_task(hold(guard));
+    spin_for(50ms);
+    EXPECT_EQ(guard.use_count(), 2);
+  }
+  EXPECT_EQ(guard.use_count(), 2);  // still suspended, not destroyed
+  spin_for(50ms);
+  EXPECT_EQ(guard.use_count(), 1);  // unwound and freed
+}
+
+TEST_F(TaskDestroyTest, DestroyedTaskWithoutCancellableAwaiterOutlivesItsOwner)
+{
+  // Nothing cancels this awaiter, so the frame lives until set() resumes it.
+  Event event(*ctx_);
+  auto guard = std::make_shared<int>(0);
+  auto hold = [](Event & e, std::shared_ptr<int> g) -> Task<void> {
+    co_await shield([](Event & e2) -> Task<void> { co_await e2.wait(); }(e));
+    (void)g;
+  };
+  {
+    auto task = ctx_->create_task(hold(event, guard));
+    spin_for(50ms);
+  }
+  spin_for(50ms);
+  EXPECT_EQ(guard.use_count(), 2);
+  event.set();
+  spin_for(50ms);
+  EXPECT_EQ(guard.use_count(), 1);
+}
+
+TEST_F(TaskDestroyTest, GoalResponseThenRequesterDestroyed)
+{
+  // The client answers in its own group, so its goal response can post the
+  // resumption without executor_ running it.
+  auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  rclcpp::executors::SingleThreadedExecutor client_executor;
+  client_executor.add_callback_group(group, node_->get_node_base_interface());
+  auto client = rclcpp_action::create_client<Fibonacci>(node_, "test_destroy_action", group);
+  bool goal_received = false;
+  action_server_ = rclcpp_action::create_server<Fibonacci>(
+    node_, "test_destroy_action",
+    [&goal_received](const rclcpp_action::GoalUUID &, std::shared_ptr<const Fibonacci::Goal>) {
+      goal_received = true;
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    },
+    [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
+    [](const std::shared_ptr<GoalHandle>) {});
+  ASSERT_TRUE(client->wait_for_action_server(5s));
+
+  auto send = [this, &client]() -> Task<void> {
+    co_await ctx_->send_goal<Fibonacci>(client, Fibonacci::Goal());
+  };
+  {
+    auto task = ctx_->create_task(send());
+    auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!goal_received && std::chrono::steady_clock::now() < deadline) {
+      spin_for(10ms);
+    }
+    ASSERT_TRUE(goal_received);
+    // Let the goal response post the resumption, then destroy the task
+    // before executor_ runs it.
+    for (int i = 0; i < 20; i++) {
+      client_executor.spin_some();
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  spin_for(50ms);
+}
+
+static Task<void> set_flag(bool & flag)
+{
+  flag = true;
+  co_return;
+}
+
+TEST_F(TaskDestroyTest, TaskDestroyedBeforeItStartsNeverRuns)
+{
+  bool ran = false;
+  {
+    auto task = ctx_->create_task(set_flag(ran));
+  }
+  spin_for(50ms);
+  EXPECT_FALSE(ran);
+}
+
+static Task<void> record_cancel(CoContext & ctx, std::vector<int> & order)
+{
+  try {
+    co_await ctx.sleep(10s);
+  } catch (const CancelledException &) {
+    order.push_back(1);
+    throw;
+  }
+}
+
+static Task<void> record_start(std::vector<int> & order)
+{
+  order.push_back(2);
+  co_return;
+}
+
+TEST_F(TaskDestroyTest, ReplacedTaskUnwindsBeforeItsReplacementStarts)
+{
+  std::vector<int> order;
+  auto task = ctx_->create_task(record_cancel(*ctx_, order));
+  spin_for(50ms);
+  task.cancel();
+  task = ctx_->create_task(record_start(order));
+  spin_for(50ms);
+  EXPECT_EQ(order, (std::vector<int>{1, 2}));
 }
