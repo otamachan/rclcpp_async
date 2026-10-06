@@ -445,6 +445,7 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 template <typename MsgT>
 void TopicStream<MsgT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
+  waiting_ = h;
   stream.waiter_ = h;
   register_cancel(
     cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
@@ -474,17 +475,14 @@ void GoalStream<ActionT>::resume_waiter(std::coroutine_handle<> h)
 template <typename ActionT>
 void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
+  waiting_ = h;
   stream.waiter_ = h;
   register_cancel(
     cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
     [this]() {
       stream.waiter_ = nullptr;
       cancelled = true;
-      if (
-        stream.auto_cancel_on_stop_ && !stream.completed_ && stream.goal_handle_ &&
-        stream.client_) {
-        stream.client_->async_cancel_goal(stream.goal_handle_);
-      }
+      stream.cancel_goal_on_stop();
     });
 }
 

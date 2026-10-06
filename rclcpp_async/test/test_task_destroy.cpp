@@ -14,8 +14,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <example_interfaces/action/fibonacci.hpp>
+#include <example_interfaces/srv/add_two_ints.hpp>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -26,6 +28,7 @@ using namespace rclcpp_async;          // NOLINT(build/namespaces)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces)
 using Fibonacci = example_interfaces::action::Fibonacci;
 using GoalHandle = rclcpp_action::ServerGoalHandle<Fibonacci>;
+using AddTwoInts = example_interfaces::srv::AddTwoInts;
 
 class TaskDestroyTest : public ::testing::Test
 {
@@ -58,6 +61,15 @@ protected:
     }
   }
 
+  void spin_for(std::chrono::milliseconds duration)
+  {
+    auto deadline = std::chrono::steady_clock::now() + duration;
+    while (std::chrono::steady_clock::now() < deadline) {
+      executor_.spin_some();
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
   void create_feedback_server(int count = 30, int interval_ms = 100)
   {
     action_server_ = rclcpp_action::create_server<Fibonacci>(
@@ -65,7 +77,10 @@ protected:
       [](const rclcpp_action::GoalUUID &, std::shared_ptr<const Fibonacci::Goal>) {
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
       },
-      [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
+      [this](const std::shared_ptr<GoalHandle>) {
+        cancel_requested_ = true;
+        return rclcpp_action::CancelResponse::ACCEPT;
+      },
       [count, interval_ms](const std::shared_ptr<GoalHandle> goal_handle) {
         std::thread([goal_handle, count, interval_ms]() {
           std::this_thread::sleep_for(200ms);
@@ -107,6 +122,7 @@ protected:
   rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp_action::Client<Fibonacci>::SharedPtr action_client_;
   rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
+  std::atomic<bool> cancel_requested_{false};
 };
 
 TEST_F(TaskDestroyTest, DestroyWhileSuspendedOnTimer)
@@ -190,4 +206,111 @@ TEST_F(TaskDestroyTest, DestroyGoalTaskWhileAwaitingFeedback)
   auto task = ctx_->create_task(coro());
   spin_until_done(task, 15s);
   EXPECT_TRUE(outer_done);
+}
+
+TEST_F(TaskDestroyTest, DestroyingATaskAwaitingFeedbackCancelsTheGoal)
+{
+  create_feedback_server(30, 100);
+  wait_for_server();
+
+  auto follow = [this]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 30;
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    if (!goal_result.ok()) {
+      co_return;
+    }
+    auto stream = *goal_result.value;
+    while (co_await stream->next()) {
+    }
+  };
+  {
+    auto task = ctx_->create_task(follow());
+    auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < deadline) {
+      executor_.spin_some();
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + 2s;
+  while (!cancel_requested_ && std::chrono::steady_clock::now() < deadline) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_TRUE(cancel_requested_);
+}
+
+static Task<void> wait_event(Event & event) { co_await event.wait(); }
+static Task<void> lock_mutex(Mutex & mutex) { co_await mutex.lock(); }
+
+TEST_F(TaskDestroyTest, EventSetAfterWaiterDestroyed)
+{
+  Event event(*ctx_);
+  {
+    auto task = ctx_->create_task(wait_event(event));
+    spin_for(50ms);
+  }
+  spin_for(50ms);  // let the deferred cancellation run
+  event.set();
+  spin_for(50ms);
+}
+
+TEST_F(TaskDestroyTest, EventSetBeforeDeferredCancellationRuns)
+{
+  Event event(*ctx_);
+  {
+    auto task = ctx_->create_task(wait_event(event));
+    spin_for(50ms);
+  }
+  event.set();  // the deferred cancellation has not run yet
+  spin_for(50ms);
+}
+
+TEST_F(TaskDestroyTest, MutexUnlockAfterWaiterDestroyed)
+{
+  Mutex mutex(*ctx_);
+  auto holder = ctx_->create_task(lock_mutex(mutex));
+  spin_for(50ms);
+  ASSERT_TRUE(mutex.is_locked());
+  {
+    auto task = ctx_->create_task(lock_mutex(mutex));
+    spin_for(50ms);
+  }
+  spin_for(50ms);
+  mutex.unlock();
+  spin_for(50ms);
+  EXPECT_FALSE(mutex.is_locked());
+}
+
+TEST_F(TaskDestroyTest, ResponseAfterRequesterDestroyed)
+{
+  std::shared_ptr<rmw_request_id_t> pending_header;
+  auto service = node_->create_service<AddTwoInts>(
+    "test_destroy_service",
+    [&pending_header](
+      std::shared_ptr<rclcpp::Service<AddTwoInts>>, std::shared_ptr<rmw_request_id_t> header,
+      std::shared_ptr<AddTwoInts::Request>) { pending_header = header; });
+  auto client = node_->create_client<AddTwoInts>("test_destroy_service");
+  auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (!client->service_is_ready() && std::chrono::steady_clock::now() < deadline) {
+    spin_for(10ms);
+  }
+  ASSERT_TRUE(client->service_is_ready());
+
+  auto request = [this, &client]() -> Task<void> {
+    co_await ctx_->send_request<AddTwoInts>(client, std::make_shared<AddTwoInts::Request>());
+  };
+  {
+    auto task = ctx_->create_task(request());
+    deadline = std::chrono::steady_clock::now() + 5s;
+    while (!pending_header && std::chrono::steady_clock::now() < deadline) {
+      spin_for(10ms);
+    }
+    ASSERT_TRUE(pending_header);
+  }
+  spin_for(50ms);  // let the deferred cancellation run
+  AddTwoInts::Response response;
+  service->send_response(*pending_header, response);
+  spin_for(200ms);
 }

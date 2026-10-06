@@ -173,3 +173,43 @@ TEST_F(TopicStreamTest, CancelDuringNext)
   ASSERT_TRUE(running.handle.done());
   EXPECT_TRUE(was_cancelled);
 }
+
+// The stream outlives the coroutine waiting on it. Destroying the waiting task
+// right after cancel() leaves the queued cancellation, and later messages, to
+// meet a frame that no longer exists.
+Task<void> WaitForNext(std::shared_ptr<TopicStream<StringMsg>> stream) { co_await stream->next(); }
+
+TEST_F(TopicStreamTest, DestroyingACancelledWaiterBeforeItUnwindsIsSafe)
+{
+  auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
+  {
+    auto task = ctx_->create_task(WaitForNext(stream));
+    task.cancel();
+  }
+  for (int i = 0; i < 10; ++i) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  publish("after");
+  for (int i = 0; i < 10; ++i) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+
+  auto next = ctx_->create_task(WaitForNext(stream));
+  spin_until_done(next);
+  EXPECT_TRUE(next.handle.done());
+}
+
+TEST_F(TopicStreamTest, DestroyingASuspendedWaiterDetachesIt)
+{
+  auto stream = ctx_->subscribe<StringMsg>("test_topic", 10);
+  {
+    auto task = ctx_->create_task(WaitForNext(stream));
+  }
+  publish("after");
+
+  auto next = ctx_->create_task(WaitForNext(stream));
+  spin_until_done(next);
+  EXPECT_TRUE(next.handle.done());
+}

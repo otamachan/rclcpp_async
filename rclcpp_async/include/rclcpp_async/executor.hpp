@@ -46,13 +46,17 @@ inline void register_cancel(
 {
   out = std::make_shared<StopCb>(token, [&ctx, h, is_done, action, &out]() {
     ctx.post([&ctx, h, is_done, action, weak = std::weak_ptr(out)]() {
+      // The awaiter owns `out`, and is_done / action may refer to it. Once it
+      // is gone (resumed, or its frame destroyed after the stop was
+      // requested) neither may be called.
+      if (!weak.lock()) {
+        return;
+      }
       if (is_done()) {
         return;
       }
       action();
-      if (weak.lock()) {
-        ctx.resume(h);
-      }
+      ctx.resume(h);
     });
   });
 }
