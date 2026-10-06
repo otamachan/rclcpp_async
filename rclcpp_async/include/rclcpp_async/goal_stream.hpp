@@ -203,6 +203,7 @@ struct SendGoalAwaiter
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
   std::shared_ptr<State> state_;
+  std::shared_ptr<void> alive_;
 
   // Same as SendRequestAwaiter: the goal response must not resume a frame
   // destroyed while suspended here.

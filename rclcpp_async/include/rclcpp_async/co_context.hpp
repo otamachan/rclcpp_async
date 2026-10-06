@@ -252,7 +252,8 @@ public:
       max_depth,
       {},
       {},
-      std::make_shared<typename SendGoalAwaiter<ActionT>::State>()};
+      std::make_shared<typename SendGoalAwaiter<ActionT>::State>(),
+      {}};
   }
 
   template <typename ServiceT, typename CallbackT>
@@ -500,6 +501,7 @@ template <typename ActionT>
 void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 {
   state_->stream = std::make_shared<GoalStream<ActionT>>(ctx, max_depth);
+  alive_ = std::make_shared<char>();
 
   typename rclcpp_action::Client<ActionT>::SendGoalOptions options;
 
@@ -523,8 +525,8 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
   // server's accept/reject). When `state->done` is already set by the
   // cancel path, the callback bails out before touching the (dangling)
   // coroutine handle.
-  options.goal_response_callback = [state = state_, client = client, &ctx = ctx,
-                                    h](const auto & goal_handle) {
+  options.goal_response_callback = [state = state_, client = client, &ctx = ctx, h,
+                                    alive = std::weak_ptr<void>(alive_)](const auto & goal_handle) {
     if (state->done) {
       return;
     }
@@ -541,7 +543,7 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
     // (Jazzy bug: https://github.com/ros2/rclcpp/issues/2796).
     // Resuming synchronously here would deadlock if the coroutine
     // immediately calls async_send_goal again.
-    ctx.post([&ctx, h]() { ctx.resume(h); });
+    post_resume(ctx, h, alive);
   };
 
   client->async_send_goal(goal, options);

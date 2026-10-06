@@ -314,3 +314,42 @@ TEST_F(TaskDestroyTest, ResponseAfterRequesterDestroyed)
   service->send_response(*pending_header, response);
   spin_for(200ms);
 }
+
+TEST_F(TaskDestroyTest, GoalResponseThenRequesterDestroyed)
+{
+  // The client answers in its own group, so its goal response can post the
+  // resumption without executor_ running it.
+  auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  rclcpp::executors::SingleThreadedExecutor client_executor;
+  client_executor.add_callback_group(group, node_->get_node_base_interface());
+  auto client = rclcpp_action::create_client<Fibonacci>(node_, "test_destroy_action", group);
+  bool goal_received = false;
+  action_server_ = rclcpp_action::create_server<Fibonacci>(
+    node_, "test_destroy_action",
+    [&goal_received](const rclcpp_action::GoalUUID &, std::shared_ptr<const Fibonacci::Goal>) {
+      goal_received = true;
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    },
+    [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
+    [](const std::shared_ptr<GoalHandle>) {});
+  ASSERT_TRUE(client->wait_for_action_server(5s));
+
+  auto send = [this, &client]() -> Task<void> {
+    co_await ctx_->send_goal<Fibonacci>(client, Fibonacci::Goal());
+  };
+  {
+    auto task = ctx_->create_task(send());
+    auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!goal_received && std::chrono::steady_clock::now() < deadline) {
+      spin_for(10ms);
+    }
+    ASSERT_TRUE(goal_received);
+    // Let the goal response post the resumption, then destroy the task
+    // before executor_ runs it.
+    for (int i = 0; i < 20; i++) {
+      client_executor.spin_some();
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  spin_for(50ms);
+}

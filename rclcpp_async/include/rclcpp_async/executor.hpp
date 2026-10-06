@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <stop_token>
+#include <utility>
 
 namespace rclcpp_async
 {
@@ -58,6 +59,17 @@ inline void register_cancel(
       action();
       ctx.resume(h);
     });
+  });
+}
+
+// Resume h later on the executor thread, unless the awaiter owning `alive` is
+// gone by then: its frame may be destroyed between the post and the resume.
+inline void post_resume(Executor & ctx, std::coroutine_handle<> h, std::weak_ptr<void> alive)
+{
+  ctx.post([&ctx, h, alive = std::move(alive)]() {
+    if (alive.lock()) {
+      ctx.resume(h);
+    }
   });
 }
 

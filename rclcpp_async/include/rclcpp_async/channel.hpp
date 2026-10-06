@@ -37,6 +37,7 @@ class Channel
   std::mutex mutex_;
   std::queue<T> queue_;
   std::coroutine_handle<> waiter_;
+  std::weak_ptr<void> waiter_alive_;
   size_t max_depth_;
   bool closed_ = false;
 
@@ -55,6 +56,7 @@ public:
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
+    std::shared_ptr<void> alive_;
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -86,7 +88,7 @@ public:
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false}; }
+  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false, {}}; }
 };
 
 template <typename T>
@@ -97,7 +99,9 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
     if (!ch.queue_.empty() || ch.closed_) {
       return false;  // don't suspend, data already available
     }
+    alive_ = std::make_shared<char>();
     ch.waiter_ = h;
+    ch.waiter_alive_ = alive_;
   }  // release ch.mutex_ before stop_callback to avoid deadlock
   cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
     std::coroutine_handle<> w;
@@ -125,6 +129,7 @@ template <typename T>
 void Channel<T>::send(T value)
 {
   std::coroutine_handle<> w;
+  std::weak_ptr<void> alive;
   {
     std::lock_guard lock(mutex_);
     if (closed_) {
@@ -136,9 +141,10 @@ void Channel<T>::send(T value)
     }
     w = waiter_;
     waiter_ = nullptr;
+    alive = std::move(waiter_alive_);
   }
   if (w) {
-    ctx_.post([w]() { w.resume(); });
+    post_resume(ctx_, w, std::move(alive));
   }
 }
 
@@ -146,14 +152,16 @@ template <typename T>
 void Channel<T>::close()
 {
   std::coroutine_handle<> w;
+  std::weak_ptr<void> alive;
   {
     std::lock_guard lock(mutex_);
     closed_ = true;
     w = waiter_;
     waiter_ = nullptr;
+    alive = std::move(waiter_alive_);
   }
   if (w) {
-    ctx_.post([w]() { w.resume(); });
+    post_resume(ctx_, w, std::move(alive));
   }
 }
 
