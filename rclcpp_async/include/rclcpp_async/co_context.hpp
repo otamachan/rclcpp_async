@@ -174,10 +174,14 @@ public:
     return task;
   }
 
+  // The callable is moved into the task's frame: a lambda's captures must
+  // outlive the caller's full-expression, as the task resumes after it.
   template <typename CallbackT>
   [[nodiscard]] auto create_task(CallbackT && callback)
   {
-    return create_task(callback());
+    return create_task([](std::decay_t<CallbackT> cb) -> decltype(cb()) {
+      co_return co_await cb();
+    }(std::forward<CallbackT>(callback)));
   }
 
   // --- Awaiter factory methods ---
