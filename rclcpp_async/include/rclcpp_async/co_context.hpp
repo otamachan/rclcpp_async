@@ -220,10 +220,13 @@ public:
   std::shared_ptr<TopicStream<MsgT>> subscribe(const std::string & topic, const rclcpp::QoS & qos)
   {
     auto stream = std::make_shared<TopicStream<MsgT>>(*this, qos.depth());
+    // The subscription is owned by the stream, so the callback holds it weakly:
+    // dropping the stream releases the subscription with it.
     stream->sub_ = node_.template create_subscription<MsgT>(
       topic, qos,
-      [s = stream](std::shared_ptr<const MsgT> msg) {
-        if (s->closed_) {
+      [weak = std::weak_ptr(stream)](std::shared_ptr<const MsgT> msg) {
+        auto s = weak.lock();
+        if (!s || s->closed_) {
           return;
         }
         s->queue_.push(std::move(msg));
@@ -281,10 +284,12 @@ public:
   std::shared_ptr<TimerStream> create_timer(std::chrono::nanoseconds period)
   {
     auto stream = std::make_shared<TimerStream>(*this);
+    // As with subscribe(): dropping the stream stops and releases the timer.
     stream->timer_ = node_.create_wall_timer(
       period,
-      [s = stream, this]() {
-        if (s->closed_) {
+      [weak = std::weak_ptr(stream), this]() {
+        auto s = weak.lock();
+        if (!s || s->closed_) {
           return;
         }
         if (s->waiter_) {
