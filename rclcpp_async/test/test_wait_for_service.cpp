@@ -143,3 +143,27 @@ TEST_F(WaitForServiceTest, Cancel)
   ASSERT_TRUE(task.handle.done());
   EXPECT_TRUE(was_cancelled);
 }
+
+static int count_timers(rclcpp::Node & node)
+{
+  int timers = 0;
+  node.get_node_base_interface()->for_each_callback_group(
+    [&timers](const rclcpp::CallbackGroup::SharedPtr & group) {
+      group->collect_all_ptrs(
+        [](const rclcpp::SubscriptionBase::SharedPtr &) {},
+        [](const rclcpp::ServiceBase::SharedPtr &) {}, [](const rclcpp::ClientBase::SharedPtr &) {},
+        [&timers](const rclcpp::TimerBase::SharedPtr &) { ++timers; },
+        [](const rclcpp::Waitable::SharedPtr &) {});
+    });
+  return timers;
+}
+
+TEST_F(WaitForServiceTest, TimeoutLeavesNoTimerBehind)
+{
+  auto coro = [&]() -> Task<void> { co_await ctx_->wait_for_service(client_, 200ms); };
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task);
+
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(count_timers(*node_), 0);
+}

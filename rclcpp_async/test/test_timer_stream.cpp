@@ -169,3 +169,13 @@ TEST_F(TimerStreamTest, CancelDuringNext)
   ASSERT_TRUE(running.handle.done());
   EXPECT_TRUE(was_cancelled);
 }
+
+TEST_F(TimerStreamTest, DroppingTheStreamReleasesTheTimer)
+{
+  std::weak_ptr<TimerStream> weak;
+  {
+    auto timer = ctx_->create_timer(10ms);
+    weak = timer;
+  }
+  EXPECT_TRUE(weak.expired());
+}

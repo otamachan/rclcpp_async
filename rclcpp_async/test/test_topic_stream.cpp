@@ -213,3 +213,15 @@ TEST_F(TopicStreamTest, DestroyingASuspendedWaiterDetachesIt)
   spin_until_done(next);
   EXPECT_TRUE(next.handle.done());
 }
+
+TEST_F(TopicStreamTest, DroppingTheStreamUnsubscribes)
+{
+  std::weak_ptr<TopicStream<StringMsg>> weak;
+  {
+    auto stream = ctx_->subscribe<StringMsg>("dropped_stream_topic", 10);
+    weak = stream;
+    EXPECT_EQ(node_->count_subscribers("dropped_stream_topic"), 1u);
+  }
+  EXPECT_TRUE(weak.expired());
+  EXPECT_EQ(node_->count_subscribers("dropped_stream_topic"), 0u);
+}
