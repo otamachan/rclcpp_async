@@ -214,14 +214,24 @@ TEST_F(TopicStreamTest, DestroyingASuspendedWaiterDetachesIt)
   EXPECT_TRUE(next.handle.done());
 }
 
+// The graph is updated asynchronously, so the count does not reflect a change at once.
+size_t WaitForSubscriberCount(rclcpp::Node & node, const std::string & topic, size_t expected)
+{
+  auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (node.count_subscribers(topic) != expected && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(10ms);
+  }
+  return node.count_subscribers(topic);
+}
+
 TEST_F(TopicStreamTest, DroppingTheStreamUnsubscribes)
 {
   std::weak_ptr<TopicStream<StringMsg>> weak;
   {
     auto stream = ctx_->subscribe<StringMsg>("dropped_stream_topic", 10);
     weak = stream;
-    EXPECT_EQ(node_->count_subscribers("dropped_stream_topic"), 1u);
+    EXPECT_EQ(WaitForSubscriberCount(*node_, "dropped_stream_topic", 1u), 1u);
   }
   EXPECT_TRUE(weak.expired());
-  EXPECT_EQ(node_->count_subscribers("dropped_stream_topic"), 0u);
+  EXPECT_EQ(WaitForSubscriberCount(*node_, "dropped_stream_topic", 0u), 0u);
 }
