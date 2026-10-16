@@ -214,7 +214,7 @@ TEST_F(TopicStreamTest, DestroyingASuspendedWaiterDetachesIt)
   EXPECT_TRUE(next.handle.done());
 }
 
-// The graph is updated asynchronously, so a subscription change is not visible in the count at once.
+// The graph is updated asynchronously, so the count does not reflect a change at once.
 size_t WaitForSubscriberCount(rclcpp::Node & node, const std::string & topic, size_t expected)
 {
   auto deadline = std::chrono::steady_clock::now() + 5s;
