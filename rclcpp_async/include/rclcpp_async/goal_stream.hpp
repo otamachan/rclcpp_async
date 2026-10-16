@@ -114,19 +114,6 @@ public:
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
-    std::coroutine_handle<> waiting_{};
-
-    // A frame destroyed while suspended here must not stay registered as the
-    // stream's waiter, or the next message would resume it. Destroying the
-    // task stops it first, and the deferred cancellation no longer runs for a
-    // destroyed awaiter, so the goal is cancelled here instead.
-    ~NextAwaiter()
-    {
-      if (waiting_ && stream.waiter_ == waiting_) {
-        stream.waiter_ = nullptr;
-        stream.cancel_goal_on_stop();
-      }
-    }
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -203,15 +190,6 @@ struct SendGoalAwaiter
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
   std::shared_ptr<State> state_;
-
-  // Same as SendRequestAwaiter: the goal response must not resume a frame
-  // destroyed while suspended here.
-  ~SendGoalAwaiter()
-  {
-    if (cancel_cb_) {
-      state_->done = true;
-    }
-  }
 
   void set_token(std::stop_token t) { token = std::move(t); }
 
