@@ -196,3 +196,22 @@ TEST_F(SleepTest, AwaitCreateTaskAlreadyDone)
   ASSERT_TRUE(task.handle.done());
   EXPECT_EQ(result, 99);
 }
+
+TEST_F(SleepTest, CreateTaskKeepsTheLambdaAlive)
+{
+  auto captured = std::make_shared<int>(42);
+  auto task = ctx_->create_task([this, captured]() -> Task<int> {
+    co_await ctx_->sleep(10ms);
+    co_return *captured;
+  });
+  // The lambda is a temporary of the statement above, yet still in use.
+  ASSERT_EQ(captured.use_count(), 2);
+
+  auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (!task.handle.done() && std::chrono::steady_clock::now() < deadline) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(task.result(), 42);
+}
