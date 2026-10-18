@@ -38,7 +38,7 @@ class TopicStream
 {
   CoContext & ctx_;
   std::queue<std::shared_ptr<const MsgT>> queue_;
-  std::coroutine_handle<> waiter_;
+  std::weak_ptr<Waiting> waiter_;
   typename rclcpp::Subscription<MsgT>::SharedPtr sub_;
   size_t max_depth_;
   bool closed_ = false;
@@ -59,16 +59,7 @@ public:
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
-    std::coroutine_handle<> waiting_{};
-
-    // A frame destroyed while suspended here must not stay registered as the
-    // stream's waiter, or the next message would resume it.
-    ~NextAwaiter()
-    {
-      if (waiting_ && stream.waiter_ == waiting_) {
-        stream.waiter_ = nullptr;
-      }
-    }
+    std::shared_ptr<Waiting> waiting_;
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -98,7 +89,7 @@ public:
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false}; }
+  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false, nullptr}; }
 
   void close();
 };

@@ -33,12 +33,7 @@ class Mutex
   Executor & ctx_;
   bool locked_ = false;
 
-  struct Waiter
-  {
-    std::coroutine_handle<> handle;
-    std::shared_ptr<bool> active;
-  };
-  std::queue<Waiter> waiters_;
+  std::queue<std::weak_ptr<Waiting>> waiters_;
 
 public:
   explicit Mutex(Executor & ctx) : ctx_(ctx) {}
@@ -50,17 +45,7 @@ public:
     Mutex & mutex;
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
-    std::shared_ptr<bool> active;
-
-    // A frame destroyed while suspended here must not stay registered, or a
-    // later unlock() would resume it. The deferred cancellation no longer runs
-    // for a destroyed awaiter, so the waiter is withdrawn here.
-    ~LockAwaiter()
-    {
-      if (active) {
-        *active = false;
-      }
-    }
+    std::shared_ptr<Waiting> waiting_;
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -81,7 +66,7 @@ public:
     void await_resume()
     {
       cancel_cb_.reset();
-      if (token.stop_requested() && !(active && *active)) {
+      if (token.stop_requested()) {
         throw CancelledException{};
       }
     }
@@ -94,20 +79,17 @@ public:
 
 inline void Mutex::LockAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  active = std::make_shared<bool>(true);
-  mutex.waiters_.push({h, active});
-  auto a = active;
-  register_cancel(cancel_cb_, token, mutex.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
+  waiting_ = std::make_shared<Waiting>(h);
+  mutex.waiters_.push(waiting_);
+  register_cancel(cancel_cb_, token, mutex.ctx_, waiting_, []() {});
 }
 
 inline void Mutex::unlock()
 {
   while (!waiters_.empty()) {
-    auto w = waiters_.front();
+    auto w = std::move(waiters_.front());
     waiters_.pop();
-    if (*w.active) {
-      *w.active = false;
-      ctx_.resume(w.handle);
+    if (resume_now(ctx_, w)) {
       return;
     }
   }

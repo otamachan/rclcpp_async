@@ -46,7 +46,6 @@ public:
     std::string source_frame;
     tf2::TimePoint time;
     std::weak_ptr<Waiting> waiting;
-    std::shared_ptr<bool> active;
     geometry_msgs::msg::TransformStamped result;
   };
 
@@ -112,17 +111,6 @@ public:
     std::shared_ptr<PendingRequest> request;
     std::shared_ptr<Waiting> waiting;
 
-    // A frame destroyed while suspended here must not stay pending, or the
-    // transform's arrival would resume it. The deferred cancellation no longer
-    // runs for a destroyed awaiter, so the request is withdrawn here.
-    ~LookupTransformAwaiter()
-    {
-      if (request && request->active && *request->active) {
-        tf.remove_pending(request);
-        *request->active = false;
-      }
-    }
-
     void set_token(std::stop_token t) { token = std::move(t); }
 
     bool await_ready()
@@ -147,16 +135,12 @@ public:
       request->time = time;
       waiting = std::make_shared<Waiting>(h);
       request->waiting = waiting;
-      request->active = std::make_shared<bool>(true);
       tf.add_pending(request);
 
-      register_cancel(
-        cancel_cb_, token, tf.ctx_, h, [r = request]() { return !*r->active; },
-        [this, &tf_buf = tf, r = request]() {
-          tf_buf.remove_pending(r);
-          *r->active = false;
-          cancelled = true;
-        });
+      register_cancel(cancel_cb_, token, tf.ctx_, waiting, [this]() {
+        tf.remove_pending(request);
+        cancelled = true;
+      });
     }
 
     geometry_msgs::msg::TransformStamped await_resume()
@@ -206,8 +190,8 @@ private:
   {
     std::lock_guard lock(mutex_);
     std::erase_if(pending_, [this](const std::shared_ptr<PendingRequest> & req) {
-      if (!*req->active) {
-        return true;
+      if (req->waiting.expired()) {
+        return true;  // its awaiter is gone
       }
       if (buffer_->canTransform(req->target_frame, req->source_frame, req->time)) {
         try {
@@ -215,7 +199,6 @@ private:
         } catch (const tf2::TransformException &) {
           return false;
         }
-        *req->active = false;
         post_resume(ctx_, req->waiting);
         return true;
       }

@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <coroutine>
 #include <cstddef>
 #include <functional>
@@ -41,36 +42,64 @@ public:
 };
 
 // A suspended coroutine, owned by its awaiter. Whoever resumes it later holds
-// a weak_ptr, which expires with the awaiter.
-struct Waiting
+// a weak_ptr, which expires with the awaiter. The handle is taken once, so of
+// the completion and the cancellation only the first resumes it.
+class Waiting
 {
-  std::coroutine_handle<> h;
+  std::atomic<std::coroutine_handle<>> h_;
+
+public:
+  explicit Waiting(std::coroutine_handle<> h) : h_(h) {}
+  std::coroutine_handle<> take() { return h_.exchange(nullptr); }
 };
 
-// Resume `w` on the executor unless its awaiter is gone by then.
-inline void post_resume(Executor & ctx, std::weak_ptr<Waiting> w)
+// Take `w` and resume it here. False when its awaiter is gone or already taken.
+inline bool resume_now(Executor & ctx, const std::weak_ptr<Waiting> & w)
 {
-  ctx.post([w = std::move(w)]() {
-    if (auto s = w.lock()) {
-      s->h.resume();
+  auto s = w.lock();
+  auto h = s ? s->take() : nullptr;
+  if (!h) {
+    return false;
+  }
+  ctx.resume(h);
+  return true;
+}
+
+// Take `w` now, run `claimed`, and resume it on the executor unless its awaiter
+// is gone by then.
+template <typename Claimed>
+inline void post_resume(Executor & ctx, std::weak_ptr<Waiting> w, Claimed claimed)
+{
+  auto s = w.lock();
+  auto h = s ? s->take() : nullptr;
+  if (!h) {
+    return;
+  }
+  claimed();
+  ctx.post([w = std::move(w), h]() {
+    if (w.lock()) {
+      h.resume();
     }
   });
 }
 
-template <typename DonePred, typename CancelAction>
-inline void register_cancel(
-  std::shared_ptr<StopCb> & out, std::stop_token token, Executor & ctx, std::coroutine_handle<> h,
-  DonePred is_done, CancelAction action)
+inline void post_resume(Executor & ctx, std::weak_ptr<Waiting> w)
 {
-  out = std::make_shared<StopCb>(token, [&ctx, h, is_done, action, &out]() {
-    ctx.post([&ctx, h, is_done, action, weak = std::weak_ptr(out)]() {
-      // The awaiter owns `out`, and is_done / action may refer to it. Once it
-      // is gone (resumed, or its frame destroyed after the stop was
-      // requested) neither may be called.
-      if (!weak.lock()) {
-        return;
-      }
-      if (is_done()) {
+  post_resume(ctx, std::move(w), []() {});
+}
+
+// On a stop request, resume `waiting` on the executor after `action`, unless
+// it was taken or its awaiter destroyed first. `action` may use the awaiter.
+template <typename CancelAction>
+inline void register_cancel(
+  std::shared_ptr<StopCb> & out, std::stop_token token, Executor & ctx,
+  const std::shared_ptr<Waiting> & waiting, CancelAction action)
+{
+  out = std::make_shared<StopCb>(token, [&ctx, w = std::weak_ptr(waiting), action]() {
+    ctx.post([&ctx, w, action]() {
+      auto s = w.lock();
+      auto h = s ? s->take() : nullptr;
+      if (!h) {
         return;
       }
       action();

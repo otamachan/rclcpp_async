@@ -61,7 +61,7 @@ class GoalStream
 
   CoContext & ctx_;
   std::queue<Event> queue_;
-  std::coroutine_handle<> waiter_;
+  std::weak_ptr<Waiting> waiter_;
   size_t max_depth_;
   bool completed_ = false;
   bool auto_cancel_on_stop_ = true;
@@ -83,14 +83,10 @@ class GoalStream
     while (queue_.size() > max_depth_ && queue_.front().type != Event::Type::kComplete) {
       queue_.pop();
     }
-    if (waiter_) {
-      auto h = waiter_;
-      waiter_ = nullptr;
-      resume_waiter(h);
-    }
+    resume_waiter(std::exchange(waiter_, {}));
   }
 
-  void resume_waiter(std::coroutine_handle<> h);
+  void resume_waiter(const std::weak_ptr<Waiting> & w);
 
   // The waiting coroutine was stopped: cancel the goal it was following.
   void cancel_goal_on_stop()
@@ -114,16 +110,14 @@ public:
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
-    std::coroutine_handle<> waiting_{};
+    std::shared_ptr<Waiting> waiting_;
 
-    // A frame destroyed while suspended here must not stay registered as the
-    // stream's waiter, or the next message would resume it. Destroying the
-    // task stops it first, and the deferred cancellation no longer runs for a
-    // destroyed awaiter, so the goal is cancelled here instead.
+    // The deferred cancellation does not run for a destroyed awaiter, so the
+    // goal it was following is cancelled here instead.
     ~NextAwaiter()
     {
-      if (waiting_ && stream.waiter_ == waiting_) {
-        stream.waiter_ = nullptr;
+      if (waiting_ && stream.waiter_.lock() == waiting_) {
+        stream.waiter_.reset();
         stream.cancel_goal_on_stop();
       }
     }
@@ -157,7 +151,7 @@ public:
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false}; }
+  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false, nullptr}; }
 
   using CancelResponse = typename ActionT::Impl::CancelGoalService::Response;
 
@@ -184,44 +178,23 @@ public:
 template <typename ActionT>
 struct SendGoalAwaiter
 {
-  // Mutable state is held via shared_ptr so that callbacks registered on
-  // the rclcpp_action::Client (notably goal_response_callback) can safely
-  // observe `done` even if the awaiter (and its coroutine frame) has been
-  // destroyed after the awaiting coroutine was cancelled before the goal
-  // response arrived.
-  struct State
-  {
-    bool done = false;
-    bool cancelled = false;
-    std::shared_ptr<GoalStream<ActionT>> stream;
-    Result<std::shared_ptr<GoalStream<ActionT>>> result;
-    std::weak_ptr<Waiting> waiting;
-  };
-
   CoContext & ctx;
   typename rclcpp_action::Client<ActionT>::SharedPtr client;
   typename ActionT::Goal goal;
   size_t max_depth;
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
-  std::shared_ptr<State> state_;
+  bool cancelled = false;
+  std::shared_ptr<GoalStream<ActionT>> stream;
+  Result<std::shared_ptr<GoalStream<ActionT>>> result;
   std::shared_ptr<Waiting> waiting_;
-
-  // Same as SendRequestAwaiter: the goal response must not resume a frame
-  // destroyed while suspended here.
-  ~SendGoalAwaiter()
-  {
-    if (cancel_cb_) {
-      state_->done = true;
-    }
-  }
 
   void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready()
   {
     if (token.stop_requested()) {
-      state_->cancelled = true;
+      cancelled = true;
       return true;
     }
     return false;
@@ -232,10 +205,10 @@ struct SendGoalAwaiter
   Result<std::shared_ptr<GoalStream<ActionT>>> await_resume()
   {
     cancel_cb_.reset();
-    if (state_->cancelled) {
+    if (cancelled) {
       throw CancelledException{};
     }
-    return std::move(state_->result);
+    return std::move(result);
   }
 };
 

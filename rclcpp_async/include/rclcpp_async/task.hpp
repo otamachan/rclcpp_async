@@ -56,7 +56,9 @@ struct Task
       std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
       {
         if (auto c = h.promise().continuation.lock()) {
-          return c->h;
+          if (auto next = c->take()) {
+            return next;
+          }
         }
         return std::noop_coroutine();
       }
@@ -196,7 +198,9 @@ struct Task<void>
       std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
       {
         if (auto c = h.promise().continuation.lock()) {
-          return c->h;
+          if (auto next = c->take()) {
+            return next;
+          }
         }
         return std::noop_coroutine();
       }
