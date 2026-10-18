@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <stop_token>
+#include <utility>
 
 namespace rclcpp_async
 {
@@ -38,6 +39,23 @@ public:
   // Resume a coroutine directly. Call only from the executor thread.
   virtual void resume(std::coroutine_handle<> h) { h.resume(); }
 };
+
+// A suspended coroutine, owned by its awaiter. Whoever resumes it later holds
+// a weak_ptr, which expires with the awaiter.
+struct Waiting
+{
+  std::coroutine_handle<> h;
+};
+
+// Resume `w` on the executor unless its awaiter is gone by then.
+inline void post_resume(Executor & ctx, std::weak_ptr<Waiting> w)
+{
+  ctx.post([w = std::move(w)]() {
+    if (auto s = w.lock()) {
+      s->h.resume();
+    }
+  });
+}
 
 template <typename DonePred, typename CancelAction>
 inline void register_cancel(

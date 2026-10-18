@@ -194,6 +194,7 @@ struct SendGoalAwaiter
     bool cancelled = false;
     std::shared_ptr<GoalStream<ActionT>> stream;
     Result<std::shared_ptr<GoalStream<ActionT>>> result;
+    std::weak_ptr<Waiting> waiting;
   };
 
   CoContext & ctx;
@@ -203,6 +204,7 @@ struct SendGoalAwaiter
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
   std::shared_ptr<State> state_;
+  std::shared_ptr<Waiting> waiting_;
 
   // Same as SendRequestAwaiter: the goal response must not resume a frame
   // destroyed while suspended here.

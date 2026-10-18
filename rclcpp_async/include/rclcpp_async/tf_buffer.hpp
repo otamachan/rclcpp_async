@@ -45,7 +45,7 @@ public:
     std::string target_frame;
     std::string source_frame;
     tf2::TimePoint time;
-    std::coroutine_handle<> handle;
+    std::weak_ptr<Waiting> waiting;
     std::shared_ptr<bool> active;
     geometry_msgs::msg::TransformStamped result;
   };
@@ -110,6 +110,7 @@ public:
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
     std::shared_ptr<PendingRequest> request;
+    std::shared_ptr<Waiting> waiting;
 
     // A frame destroyed while suspended here must not stay pending, or the
     // transform's arrival would resume it. The deferred cancellation no longer
@@ -144,7 +145,8 @@ public:
       request->target_frame = target_frame;
       request->source_frame = source_frame;
       request->time = time;
-      request->handle = h;
+      waiting = std::make_shared<Waiting>(h);
+      request->waiting = waiting;
       request->active = std::make_shared<bool>(true);
       tf.add_pending(request);
 
@@ -170,8 +172,9 @@ public:
   LookupTransformAwaiter lookup_transform(
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time)
   {
-    return LookupTransformAwaiter{*this, target_frame, source_frame, tf2_ros::fromRclcpp(time),
-                                  {},    {},           false,        nullptr};
+    return LookupTransformAwaiter{*this,  target_frame, source_frame, tf2_ros::fromRclcpp(time),
+                                  {},     {},           false,        nullptr,
+                                  nullptr};
   }
 
   void add_pending(std::shared_ptr<PendingRequest> req)
@@ -213,8 +216,7 @@ private:
           return false;
         }
         *req->active = false;
-        auto h = req->handle;
-        ctx_.post([h]() { h.resume(); });
+        post_resume(ctx_, req->waiting);
         return true;
       }
       return false;
