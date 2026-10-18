@@ -101,12 +101,16 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
     waiting_ = std::make_shared<Waiting>(h);
     ch.waiter_ = waiting_;
   }  // release ch.mutex_ before stop_callback to avoid deadlock
-  register_cancel(cancel_cb_, token, ch.ctx_, waiting_, [this]() {
-    std::lock_guard lock(ch.mutex_);
-    if (ch.waiter_.lock() == waiting_) {
+  // Withdrawn on the spot, so a send after the stop request cannot win.
+  cancel_cb_ = std::make_shared<StopCb>(token, [this]() {
+    {
+      std::lock_guard lock(ch.mutex_);
+      if (ch.waiter_.lock() != waiting_) {
+        return;
+      }
       ch.waiter_.reset();
     }
-    cancelled = true;
+    post_resume(ch.ctx_, waiting_, [this]() { cancelled = true; });
   });
   return true;
 }
