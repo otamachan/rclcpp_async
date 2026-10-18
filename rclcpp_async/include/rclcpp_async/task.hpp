@@ -41,6 +41,9 @@ struct Task
     std::exception_ptr exception;
     std::coroutine_handle<> continuation;
     std::stop_source stop_source;
+    // Set when the Task that owned this frame was destroyed while the frame
+    // was still running: the frame frees itself when it completes.
+    bool detached = false;
 
     Task get_return_object()
     {
@@ -54,6 +57,10 @@ struct Task
       bool await_ready() noexcept { return false; }
       std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
       {
+        if (h.promise().detached) {
+          h.destroy();
+          return std::noop_coroutine();
+        }
         if (h.promise().continuation) {
           return h.promise().continuation;
         }
@@ -129,13 +136,7 @@ struct Task
   explicit operator bool() const noexcept { return handle != nullptr; }
   bool done() const noexcept { return handle && handle.done(); }
 
-  ~Task()
-  {
-    if (handle) {
-      handle.promise().stop_source.request_stop();
-      handle.destroy();
-    }
-  }
+  ~Task() { release(); }
   Task(Task && o) noexcept
   : handle(o.handle), started_(o.started_), parent_cancel_cb_(std::move(o.parent_cancel_cb_))
   {
@@ -144,10 +145,7 @@ struct Task
   Task & operator=(Task && o) noexcept
   {
     if (this != &o) {
-      if (handle) {
-        handle.promise().stop_source.request_stop();
-        handle.destroy();
-      }
+      release();
       handle = o.handle;
       started_ = o.started_;
       parent_cancel_cb_ = std::move(o.parent_cancel_cb_);
@@ -160,6 +158,24 @@ struct Task
 
 private:
   explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}
+
+  // A running frame is suspended inside an awaiter that has handed its handle
+  // out (to a stream, a queue, a pending response, a posted resumption...), so
+  // it cannot be destroyed here. Cancel it and let it go: the awaiter resumes
+  // it, CancelledException unwinds the body, and FinalAwaiter frees the frame.
+  void release()
+  {
+    if (!handle) {
+      return;
+    }
+    bool running = started_ && !handle.done();
+    handle.promise().detached = running;
+    handle.promise().stop_source.request_stop();
+    if (!running) {
+      handle.destroy();
+    }
+    handle = nullptr;
+  }
 };
 
 // void specialization
@@ -171,6 +187,9 @@ struct Task<void>
     std::exception_ptr exception;
     std::coroutine_handle<> continuation;
     std::stop_source stop_source;
+    // Set when the Task that owned this frame was destroyed while the frame
+    // was still running: the frame frees itself when it completes.
+    bool detached = false;
 
     Task get_return_object()
     {
@@ -184,6 +203,10 @@ struct Task<void>
       bool await_ready() noexcept { return false; }
       std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
       {
+        if (h.promise().detached) {
+          h.destroy();
+          return std::noop_coroutine();
+        }
         if (h.promise().continuation) {
           return h.promise().continuation;
         }
@@ -249,13 +272,7 @@ struct Task<void>
   explicit operator bool() const noexcept { return handle != nullptr; }
   bool done() const noexcept { return handle && handle.done(); }
 
-  ~Task()
-  {
-    if (handle) {
-      handle.promise().stop_source.request_stop();
-      handle.destroy();
-    }
-  }
+  ~Task() { release(); }
   Task(Task && o) noexcept
   : handle(o.handle), started_(o.started_), parent_cancel_cb_(std::move(o.parent_cancel_cb_))
   {
@@ -264,10 +281,7 @@ struct Task<void>
   Task & operator=(Task && o) noexcept
   {
     if (this != &o) {
-      if (handle) {
-        handle.promise().stop_source.request_stop();
-        handle.destroy();
-      }
+      release();
       handle = o.handle;
       started_ = o.started_;
       parent_cancel_cb_ = std::move(o.parent_cancel_cb_);
@@ -280,6 +294,24 @@ struct Task<void>
 
 private:
   explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}
+
+  // A running frame is suspended inside an awaiter that has handed its handle
+  // out (to a stream, a queue, a pending response, a posted resumption...), so
+  // it cannot be destroyed here. Cancel it and let it go: the awaiter resumes
+  // it, CancelledException unwinds the body, and FinalAwaiter frees the frame.
+  void release()
+  {
+    if (!handle) {
+      return;
+    }
+    bool running = started_ && !handle.done();
+    handle.promise().detached = running;
+    handle.promise().stop_source.request_stop();
+    if (!running) {
+      handle.destroy();
+    }
+    handle = nullptr;
+  }
 };
 
 // Fire-and-forget coroutine that starts immediately and self-destructs on

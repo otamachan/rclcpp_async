@@ -53,17 +53,6 @@ struct SendRequestAwaiter
   std::shared_ptr<StopCb> cancel_cb_;
   std::shared_ptr<State> state_;
 
-  // A frame destroyed while suspended here must not be resumed by the
-  // response. The deferred cancellation no longer runs for a destroyed
-  // awaiter, so the request is marked done here. cancel_cb_ is set only while
-  // suspended, which leaves copies made before the co_await alone.
-  ~SendRequestAwaiter()
-  {
-    if (cancel_cb_) {
-      state_->done = true;
-    }
-  }
-
   void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready()
