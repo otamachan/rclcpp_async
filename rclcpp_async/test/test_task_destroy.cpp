@@ -21,6 +21,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <std_msgs/msg/string.hpp>
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
@@ -313,4 +314,83 @@ TEST_F(TaskDestroyTest, ResponseAfterRequesterDestroyed)
   AddTwoInts::Response response;
   service->send_response(*pending_header, response);
   spin_for(200ms);
+}
+
+TEST_F(TaskDestroyTest, GoalResponseThenRequesterDestroyed)
+{
+  // The client answers in its own group, so its goal response can post the
+  // resumption without executor_ running it.
+  auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  rclcpp::executors::SingleThreadedExecutor client_executor;
+  client_executor.add_callback_group(group, node_->get_node_base_interface());
+  auto client = rclcpp_action::create_client<Fibonacci>(node_, "test_destroy_action", group);
+  bool goal_received = false;
+  action_server_ = rclcpp_action::create_server<Fibonacci>(
+    node_, "test_destroy_action",
+    [&goal_received](const rclcpp_action::GoalUUID &, std::shared_ptr<const Fibonacci::Goal>) {
+      goal_received = true;
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    },
+    [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
+    [](const std::shared_ptr<GoalHandle>) {});
+  ASSERT_TRUE(client->wait_for_action_server(5s));
+
+  auto send = [this, &client]() -> Task<void> {
+    co_await ctx_->send_goal<Fibonacci>(client, Fibonacci::Goal());
+  };
+  {
+    auto task = ctx_->create_task(send());
+    auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!goal_received && std::chrono::steady_clock::now() < deadline) {
+      spin_for(10ms);
+    }
+    ASSERT_TRUE(goal_received);
+    // Let the goal response post the resumption, then destroy the task
+    // before executor_ runs it.
+    for (int i = 0; i < 20; i++) {
+      client_executor.spin_some();
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  spin_for(50ms);
+}
+
+// A node-like owner holding the context, what its task waits on, and the task.
+struct TaskOwner
+{
+  TaskOwner(rclcpp::Node & node, std::shared_ptr<int> g)
+  : ctx(node), event(ctx), guard(std::move(g))
+  {
+    stream = ctx.subscribe<std_msgs::msg::String>("test_destroy_owner_topic", 10);
+  }
+  CoContext ctx;
+  Event event;
+  std::shared_ptr<TopicStream<std_msgs::msg::String>> stream;
+  std::shared_ptr<int> guard;
+  Task<void> task;
+
+  template <typename F>
+  Task<void> run(F wait)
+  {
+    auto g = guard;
+    co_await wait(*this);
+  }
+};
+
+TEST_F(TaskDestroyTest, OwnerDestroyedWhileItsTaskWaits)
+{
+  auto pub = node_->create_publisher<std_msgs::msg::String>("test_destroy_owner_topic", 10);
+  auto check = [&](auto wait) {
+    auto guard = std::make_shared<int>(0);
+    auto owner = std::make_unique<TaskOwner>(*node_, guard);
+    owner->task = owner->ctx.create_task(owner->run(wait));
+    spin_for(50ms);
+    owner.reset();
+    pub->publish(std_msgs::msg::String());
+    spin_for(50ms);
+    EXPECT_EQ(guard.use_count(), 1);  // the frame went with its owner
+  };
+  check([](TaskOwner & o) { return as_task(o.event.wait()); });
+  check([](TaskOwner & o) { return as_task(o.ctx.sleep(10s)); });
+  check([](TaskOwner & o) -> Task<void> { co_await o.stream->next(); });
 }

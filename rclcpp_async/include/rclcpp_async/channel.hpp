@@ -36,7 +36,7 @@ class Channel
   Executor & ctx_;
   std::mutex mutex_;
   std::queue<T> queue_;
-  std::coroutine_handle<> waiter_;
+  std::weak_ptr<Waiting> waiter_;
   size_t max_depth_;
   bool closed_ = false;
 
@@ -55,6 +55,7 @@ public:
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
     bool cancelled = false;
+    std::shared_ptr<Waiting> waiting_;
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -86,7 +87,7 @@ public:
     }
   };
 
-  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false}; }
+  NextAwaiter next() { return NextAwaiter{*this, {}, {}, false, nullptr}; }
 };
 
 template <typename T>
@@ -97,26 +98,19 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
     if (!ch.queue_.empty() || ch.closed_) {
       return false;  // don't suspend, data already available
     }
-    ch.waiter_ = h;
+    waiting_ = std::make_shared<Waiting>(h);
+    ch.waiter_ = waiting_;
   }  // release ch.mutex_ before stop_callback to avoid deadlock
-  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
-    std::coroutine_handle<> w;
+  cancel_cb_ = std::make_shared<StopCb>(token, [this]() {
     {
       std::lock_guard lock(ch.mutex_);
-      if (ch.waiter_ != h) {
+      if (ch.waiter_.lock() != waiting_) {
         return;
       }
-      w = ch.waiter_;
-      ch.waiter_ = nullptr;
+      ch.waiter_.reset();
     }
-    if (w) {
-      cancelled = true;
-      ch.ctx_.post([w, weak = std::weak_ptr(cb)]() {
-        if (weak.lock()) {
-          w.resume();
-        }
-      });
-    }
+    cancelled = true;
+    post_resume(ch.ctx_, waiting_);
   });
   return true;
 }
@@ -124,7 +118,7 @@ bool Channel<T>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 template <typename T>
 void Channel<T>::send(T value)
 {
-  std::coroutine_handle<> w;
+  std::weak_ptr<Waiting> w;
   {
     std::lock_guard lock(mutex_);
     if (closed_) {
@@ -134,26 +128,24 @@ void Channel<T>::send(T value)
     while (queue_.size() > max_depth_) {
       queue_.pop();
     }
-    w = waiter_;
-    waiter_ = nullptr;
+    w = std::exchange(waiter_, {});
   }
-  if (w) {
-    ctx_.post([w]() { w.resume(); });
+  if (!w.expired()) {
+    post_resume(ctx_, std::move(w));
   }
 }
 
 template <typename T>
 void Channel<T>::close()
 {
-  std::coroutine_handle<> w;
+  std::weak_ptr<Waiting> w;
   {
     std::lock_guard lock(mutex_);
     closed_ = true;
-    w = waiter_;
-    waiter_ = nullptr;
+    w = std::exchange(waiter_, {});
   }
-  if (w) {
-    ctx_.post([w]() { w.resume(); });
+  if (!w.expired()) {
+    post_resume(ctx_, std::move(w));
   }
 }
 
