@@ -33,12 +33,7 @@ class Event
   Executor & ctx_;
   bool set_ = false;
 
-  struct Waiter
-  {
-    std::coroutine_handle<> handle;
-    std::shared_ptr<bool> active;
-  };
-  std::queue<Waiter> waiters_;
+  std::queue<std::weak_ptr<Waiting>> waiters_;
 
 public:
   explicit Event(Executor & ctx) : ctx_(ctx) {}
@@ -54,17 +49,7 @@ public:
     Event & event;
     std::stop_token token;
     std::shared_ptr<StopCb> cancel_cb_;
-    std::shared_ptr<bool> active;
-
-    // A frame destroyed while suspended here must not stay registered, or a
-    // later set() would resume it. The deferred cancellation no longer runs
-    // for a destroyed awaiter, so the waiter is withdrawn here.
-    ~WaitAwaiter()
-    {
-      if (active) {
-        *active = false;
-      }
-    }
+    std::shared_ptr<Waiting> waiting_;
 
     void set_token(std::stop_token t) { token = std::move(t); }
 
@@ -92,24 +77,20 @@ public:
 
 inline void Event::WaitAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  active = std::make_shared<bool>(true);
-  event.waiters_.push({h, active});
-  auto a = active;
-  register_cancel(cancel_cb_, token, event.ctx_, h, [a]() { return !*a; }, [a]() { *a = false; });
+  waiting_ = std::make_shared<Waiting>(h);
+  event.waiters_.push(waiting_);
+  register_cancel(cancel_cb_, token, event.ctx_, waiting_, []() {});
 }
 
 inline void Event::set()
 {
   set_ = true;
-  std::queue<Waiter> pending;
+  std::queue<std::weak_ptr<Waiting>> pending;
   pending.swap(waiters_);
   while (!pending.empty()) {
-    auto w = pending.front();
+    auto w = std::move(pending.front());
     pending.pop();
-    if (*w.active) {
-      *w.active = false;
-      ctx_.resume(w.handle);
-    }
+    resume_now(ctx_, w);
   }
 }
 

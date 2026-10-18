@@ -35,41 +35,21 @@ struct SendRequestAwaiter
 {
   using Response = typename ServiceT::Response::SharedPtr;
 
-  // Mutable state is held via shared_ptr so that the response callback
-  // registered on the rclcpp::Client can safely observe `done` even if
-  // the awaiter (and its coroutine frame) has been destroyed after the
-  // awaiting coroutine was cancelled.
-  struct State
-  {
-    bool done = false;
-    bool cancelled = false;
-    Response response;
-  };
-
   CoContext & ctx;
   typename rclcpp::Client<ServiceT>::SharedPtr client;
   typename ServiceT::Request::SharedPtr request;
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
-  std::shared_ptr<State> state_;
-
-  // A frame destroyed while suspended here must not be resumed by the
-  // response. The deferred cancellation no longer runs for a destroyed
-  // awaiter, so the request is marked done here. cancel_cb_ is set only while
-  // suspended, which leaves copies made before the co_await alone.
-  ~SendRequestAwaiter()
-  {
-    if (cancel_cb_) {
-      state_->done = true;
-    }
-  }
+  bool cancelled = false;
+  Response response;
+  std::shared_ptr<Waiting> waiting_;
 
   void set_token(std::stop_token t) { token = std::move(t); }
 
   bool await_ready()
   {
     if (token.stop_requested()) {
-      state_->cancelled = true;
+      cancelled = true;
       return true;
     }
     return false;
@@ -81,10 +61,10 @@ struct SendRequestAwaiter
   Response await_resume()
   {
     cancel_cb_.reset();
-    if (state_->cancelled) {
+    if (cancelled) {
       throw CancelledException{};
     }
-    return std::move(state_->response);
+    return std::move(response);
   }
 };
 

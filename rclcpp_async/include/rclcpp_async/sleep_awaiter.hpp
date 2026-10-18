@@ -39,7 +39,7 @@ struct SleepAwaiter
   std::stop_token token;
   std::shared_ptr<StopCb> cancel_cb_;
   bool cancelled = false;
-  bool done = false;
+  std::shared_ptr<Waiting> waiting_;
 
   void set_token(std::stop_token t) { token = std::move(t); }
 

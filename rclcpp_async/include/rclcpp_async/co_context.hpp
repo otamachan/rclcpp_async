@@ -199,17 +199,12 @@ public:
     typename ServiceT::Request::SharedPtr request)
   {
     return SendRequestAwaiter<ServiceT>{
-      *this,
-      std::move(client),
-      std::move(request),
-      {},
-      {},
-      std::make_shared<typename SendRequestAwaiter<ServiceT>::State>()};
+      *this, std::move(client), std::move(request), {}, {}, false, nullptr, nullptr};
   }
 
   SleepAwaiter sleep(std::chrono::nanoseconds duration)
   {
-    return SleepAwaiter{*this, duration, nullptr, {}, {}, false, false};
+    return SleepAwaiter{*this, duration, nullptr, {}, {}, false, nullptr};
   }
 
   template <typename ActionT>
@@ -237,11 +232,7 @@ public:
         while (s->queue_.size() > s->max_depth_) {
           s->queue_.pop();
         }
-        if (s->waiter_) {
-          auto w = s->waiter_;
-          s->waiter_ = nullptr;
-          s->ctx_.resume(w);
-        }
+        resume_now(s->ctx_, std::exchange(s->waiter_, {}));
       },
       subscription_options());
     return stream;
@@ -253,14 +244,7 @@ public:
     size_t max_depth = kDefaultStreamDepth)
   {
     return SendGoalAwaiter<ActionT>{
-      *this,
-      std::move(client),
-      std::move(goal),
-      max_depth,
-      {},
-      {},
-      std::make_shared<typename SendGoalAwaiter<ActionT>::State>(),
-      nullptr};
+      *this, std::move(client), std::move(goal), max_depth, {}, {}, false, nullptr, {}, nullptr};
   }
 
   template <typename ServiceT, typename CallbackT>
@@ -297,11 +281,7 @@ public:
         if (!s || s->closed_) {
           return;
         }
-        if (s->waiter_) {
-          auto w = s->waiter_;
-          s->waiter_ = nullptr;
-          resume(w);
-        } else {
+        if (!resume_now(*this, std::exchange(s->waiter_, {}))) {
           s->pending_++;
         }
       },
@@ -401,53 +381,37 @@ public:
 template <typename ServiceT>
 void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
 {
-  // Capture `state` by value (shared_ptr) so the callback stays valid even
-  // if the awaiter is destroyed (e.g. cancellation) before the response
-  // arrives. When `state->done` is already set by the cancel path, the
-  // response callback bails out before touching the (dangling) handle.
+  // The callback may outlive the awaiter, so it uses `this` only while
+  // waiting_ is alive.
+  waiting_ = std::make_shared<Waiting>(h);
   client->async_send_request(
     request,
-    [state = state_, &ctx = ctx, h](typename rclcpp::Client<ServiceT>::SharedFuture future) {
-      if (state->done) {
-        return;
+    [this, w = std::weak_ptr(waiting_)](typename rclcpp::Client<ServiceT>::SharedFuture future) {
+      if (auto s = w.lock()) {
+        response = future.get();
+        resume_now(ctx, w);
       }
-      state->done = true;
-      state->response = future.get();
-      ctx.resume(h);
     });
 
-  register_cancel(
-    cancel_cb_, token, ctx, h, [state = state_]() { return state->done; },
-    [state = state_]() {
-      state->done = true;
-      state->cancelled = true;
-    });
+  register_cancel(cancel_cb_, token, ctx, waiting_, [this]() { cancelled = true; });
 }
 
 inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  auto finish = [this, h]() {
-    if (done) {
-      return;
-    }
-    done = true;
-    timer->cancel();
-    ctx.resume(h);
-  };
+  waiting_ = std::make_shared<Waiting>(h);
+  timer = ctx.node().create_wall_timer(
+    duration,
+    [this]() {
+      timer->cancel();
+      resume_now(ctx, waiting_);
+    },
+    ctx.callback_group());
 
-  timer = ctx.node().create_wall_timer(duration, [finish]() { finish(); }, ctx.callback_group());
-
-  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
-    if (done) {
-      return;
-    }
-    done = true;
-    timer->cancel();
-    cancelled = true;
-    ctx.post([h, weak = std::weak_ptr(cb)]() {
-      if (weak.lock()) {
-        h.resume();
-      }
+  // Cancelled on the spot, so a tick after the stop request cannot win.
+  cancel_cb_ = std::make_shared<StopCb>(token, [this]() {
+    post_resume(ctx, waiting_, [this]() {
+      timer->cancel();
+      cancelled = true;
     });
   });
 }
@@ -455,45 +419,37 @@ inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 template <typename MsgT>
 void TopicStream<MsgT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  waiting_ = h;
-  stream.waiter_ = h;
-  register_cancel(
-    cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
-    [this]() {
-      stream.waiter_ = nullptr;
-      cancelled = true;
-    });
+  waiting_ = std::make_shared<Waiting>(h);
+  stream.waiter_ = waiting_;
+  register_cancel(cancel_cb_, token, stream.ctx_, waiting_, [this]() {
+    stream.waiter_.reset();
+    cancelled = true;
+  });
 }
 
 template <typename MsgT>
 void TopicStream<MsgT>::close()
 {
   closed_ = true;
-  if (waiter_) {
-    auto w = waiter_;
-    waiter_ = nullptr;
-    ctx_.resume(w);
-  }
+  resume_now(ctx_, std::exchange(waiter_, {}));
 }
 
 template <typename ActionT>
-void GoalStream<ActionT>::resume_waiter(std::coroutine_handle<> h)
+void GoalStream<ActionT>::resume_waiter(const std::weak_ptr<Waiting> & w)
 {
-  ctx_.resume(h);
+  resume_now(ctx_, w);
 }
 
 template <typename ActionT>
 void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  waiting_ = h;
-  stream.waiter_ = h;
-  register_cancel(
-    cancel_cb_, token, stream.ctx_, h, [this, h]() { return stream.waiter_ != h; },
-    [this]() {
-      stream.waiter_ = nullptr;
-      cancelled = true;
-      stream.cancel_goal_on_stop();
-    });
+  waiting_ = std::make_shared<Waiting>(h);
+  stream.waiter_ = waiting_;
+  register_cancel(cancel_cb_, token, stream.ctx_, waiting_, [this]() {
+    stream.waiter_.reset();
+    cancelled = true;
+    stream.cancel_goal_on_stop();
+  });
 }
 
 template <typename ActionT>
@@ -506,7 +462,7 @@ void GoalStream<ActionT>::CancelAwaiter::await_suspend(std::coroutine_handle<> h
     [this, w = std::weak_ptr(waiting_)](typename CancelResponse::SharedPtr resp) {
       if (auto s = w.lock()) {
         response = std::move(resp);
-        stream.ctx_.resume(s->h);
+        resume_now(stream.ctx_, w);
       }
     });
 }
@@ -514,76 +470,60 @@ void GoalStream<ActionT>::CancelAwaiter::await_suspend(std::coroutine_handle<> h
 template <typename ActionT>
 void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 {
-  state_->stream = std::make_shared<GoalStream<ActionT>>(ctx, max_depth);
+  stream = std::make_shared<GoalStream<ActionT>>(ctx, max_depth);
 
   typename rclcpp_action::Client<ActionT>::SendGoalOptions options;
 
-  options.feedback_callback = [s = state_->stream](auto, const auto & feedback) {
+  options.feedback_callback = [s = stream](auto, const auto & feedback) {
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kFeedback;
     event.feedback = feedback;
     s->push(std::move(event));
   };
 
-  options.result_callback = [s = state_->stream](const auto & wrapped_result) {
+  options.result_callback = [s = stream](const auto & wrapped_result) {
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kComplete;
     event.result = wrapped_result;
     s->push(std::move(event));
   };
 
-  // Capture `state` by value (shared_ptr) so the callback stays valid even
-  // if the awaiter is destroyed before goal_response arrives (e.g. the
-  // awaiting coroutine was cancelled between async_send_goal() and the
-  // server's accept/reject). When `state->done` is already set by the
-  // cancel path, the callback bails out before touching the (dangling)
-  // coroutine handle.
+  // As in send_request, the callback uses `this` only while waiting_ is alive.
   waiting_ = std::make_shared<Waiting>(h);
-  state_->waiting = waiting_;
-  options.goal_response_callback = [state = state_, client = client,
-                                    &ctx = ctx](const auto & goal_handle) {
-    if (state->done) {
+  options.goal_response_callback = [this, w = std::weak_ptr(waiting_)](const auto & goal_handle) {
+    auto s = w.lock();
+    if (!s) {
       return;
     }
-    state->done = true;
     if (!goal_handle) {
-      state->result = Result<std::shared_ptr<GoalStream<ActionT>>>::Error("goal rejected");
+      result = Result<std::shared_ptr<GoalStream<ActionT>>>::Error("goal rejected");
     } else {
-      state->stream->goal_handle_ = goal_handle;
-      state->stream->client_ = client;
-      state->result = Result<std::shared_ptr<GoalStream<ActionT>>>::Ok(state->stream);
+      stream->goal_handle_ = goal_handle;
+      stream->client_ = client;
+      result = Result<std::shared_ptr<GoalStream<ActionT>>>::Ok(stream);
     }
     // Use post() instead of resume() to defer coroutine resumption.
     // rclcpp_action holds goal_requests_mutex during this callback
     // (Jazzy bug: https://github.com/ros2/rclcpp/issues/2796).
     // Resuming synchronously here would deadlock if the coroutine
     // immediately calls async_send_goal again.
-    post_resume(ctx, state->waiting);
+    post_resume(ctx, w);
   };
 
   client->async_send_goal(goal, options);
 
-  register_cancel(
-    cancel_cb_, token, ctx, h, [state = state_]() { return state->done; },
-    [state = state_]() {
-      state->done = true;
-      state->cancelled = true;
-    });
+  register_cancel(cancel_cb_, token, ctx, waiting_, [this]() { cancelled = true; });
 }
 
 inline void TimerStream::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-  stream.waiter_ = h;
-  cancel_cb_ = std::make_shared<StopCb>(token, [this, h, &cb = cancel_cb_]() {
-    if (stream.waiter_ != h) {
-      return;
-    }
-    stream.cancel();
-    cancelled = true;
-    stream.ctx_.post([h, weak = std::weak_ptr(cb)]() {
-      if (weak.lock()) {
-        h.resume();
-      }
+  waiting_ = std::make_shared<Waiting>(h);
+  stream.waiter_ = waiting_;
+  // Stopped on the spot, as Sleep is.
+  cancel_cb_ = std::make_shared<StopCb>(token, [this]() {
+    post_resume(stream.ctx_, waiting_, [this]() {
+      stream.cancel();
+      cancelled = true;
     });
   });
 }
