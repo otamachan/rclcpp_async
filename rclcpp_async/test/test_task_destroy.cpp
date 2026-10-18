@@ -394,3 +394,65 @@ TEST_F(TaskDestroyTest, OwnerDestroyedWhileItsTaskWaits)
   check([](TaskOwner & o) { return as_task(o.ctx.sleep(10s)); });
   check([](TaskOwner & o) -> Task<void> { co_await o.stream->next(); });
 }
+
+TEST_F(TaskDestroyTest, CancelGoalResponseAfterRequesterDestroyed)
+{
+  // As in GoalResponseThenRequesterDestroyed, the client answers in its own
+  // group, so the cancel response arrives only when client_executor spins.
+  auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  rclcpp::executors::SingleThreadedExecutor client_executor;
+  client_executor.add_callback_group(group, node_->get_node_base_interface());
+  auto client = rclcpp_action::create_client<Fibonacci>(node_, "test_destroy_action", group);
+  std::shared_ptr<GoalHandle> goal_handle;  // keeps the goal active
+  action_server_ = rclcpp_action::create_server<Fibonacci>(
+    node_, "test_destroy_action",
+    [](const rclcpp_action::GoalUUID &, std::shared_ptr<const Fibonacci::Goal>) {
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    },
+    [this](const std::shared_ptr<GoalHandle>) {
+      cancel_requested_ = true;
+      return rclcpp_action::CancelResponse::ACCEPT;
+    },
+    [&goal_handle](const std::shared_ptr<GoalHandle> gh) { goal_handle = gh; });
+  ASSERT_TRUE(client->wait_for_action_server(5s));
+
+  std::shared_ptr<GoalStream<Fibonacci>> stream;
+  auto send = [this, &client, &stream]() -> Task<void> {
+    auto r = co_await ctx_->send_goal<Fibonacci>(client, Fibonacci::Goal());
+    stream = *r.value;
+  };
+  auto sender = ctx_->create_task(send());
+  auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (!stream && std::chrono::steady_clock::now() < deadline) {
+    executor_.spin_some();
+    client_executor.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  ASSERT_TRUE(stream);
+
+  auto cancel = [&stream]() -> Task<void> { co_await stream->cancel_goal(); };
+  {
+    auto task = ctx_->create_task(cancel());
+    deadline = std::chrono::steady_clock::now() + 5s;
+    while (!cancel_requested_ && std::chrono::steady_clock::now() < deadline) {
+      spin_for(10ms);
+    }
+    ASSERT_TRUE(cancel_requested_);
+  }
+  for (int i = 0; i < 20; i++) {
+    client_executor.spin_some();  // the cancel response finds the task gone
+    std::this_thread::sleep_for(10ms);
+  }
+  spin_for(50ms);
+}
+
+TEST_F(TaskDestroyTest, AwaitedTaskFinishesAfterAwaiterDestroyed)
+{
+  // The awaited task is owned outside the awaiting one, so it outlives it.
+  auto child = ctx_->create_task(as_task(ctx_->sleep(50ms)));
+  {
+    auto task = ctx_->create_task([&child]() -> Task<void> { co_await child; }());
+    spin_for(10ms);
+  }
+  spin_for(100ms);
+}

@@ -16,6 +16,7 @@
 
 #include <coroutine>
 #include <exception>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -35,12 +36,14 @@ template <typename T>
 struct ShieldAwaiter
 {
   Task<T> task_;
+  std::shared_ptr<Waiting> waiting_;
 
   bool await_ready() { return task_.handle.done(); }
 
   std::coroutine_handle<> await_suspend(std::coroutine_handle<> cont)
   {
-    task_.handle.promise().continuation = cont;
+    waiting_ = std::make_shared<Waiting>(cont);
+    task_.handle.promise().continuation = waiting_;
     if (task_.started_) {
       return std::noop_coroutine();
     }
@@ -71,7 +74,7 @@ struct ShieldAwaiter
 template <typename T>
 detail::ShieldAwaiter<T> shield(Task<T> task)
 {
-  return {std::move(task)};
+  return {std::move(task), nullptr};
 }
 
 }  // namespace rclcpp_async

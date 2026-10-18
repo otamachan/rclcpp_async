@@ -499,10 +499,15 @@ void GoalStream<ActionT>::NextAwaiter::await_suspend(std::coroutine_handle<> h)
 template <typename ActionT>
 void GoalStream<ActionT>::CancelAwaiter::await_suspend(std::coroutine_handle<> h)
 {
+  waiting_ = std::make_shared<Waiting>(h);
+  // `this` is alive exactly while waiting_ is.
   stream.client_->async_cancel_goal(
-    stream.goal_handle_, [this, h](typename CancelResponse::SharedPtr resp) {
-      response = std::move(resp);
-      stream.ctx_.resume(h);
+    stream.goal_handle_,
+    [this, w = std::weak_ptr(waiting_)](typename CancelResponse::SharedPtr resp) {
+      if (auto s = w.lock()) {
+        response = std::move(resp);
+        stream.ctx_.resume(s->h);
+      }
     });
 }
 
