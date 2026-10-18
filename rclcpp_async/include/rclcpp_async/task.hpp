@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "rclcpp_async/cancelled_exception.hpp"
+#include "rclcpp_async/executor.hpp"
 
 namespace rclcpp_async
 {
@@ -39,7 +40,7 @@ struct Task
   {
     std::optional<T> value;
     std::exception_ptr exception;
-    std::coroutine_handle<> continuation;
+    std::weak_ptr<Waiting> continuation;
     std::stop_source stop_source;
 
     Task get_return_object()
@@ -54,8 +55,8 @@ struct Task
       bool await_ready() noexcept { return false; }
       std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
       {
-        if (h.promise().continuation) {
-          return h.promise().continuation;
+        if (auto c = h.promise().continuation.lock()) {
+          return c->h;
         }
         return std::noop_coroutine();
       }
@@ -91,30 +92,40 @@ struct Task
 
   void set_token(std::stop_token t) { parent_token_ = std::move(t); }
 
-  // co_await Task (coroutine chaining)
-  bool await_ready() { return handle.done(); }
-  std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
+  // co_await Task (coroutine chaining). The awaiter lives in the awaiting
+  // frame, so the continuation expires with it even if this Task outlives it.
+  struct Awaiter
   {
-    handle.promise().continuation = h;
-    if (parent_token_.stop_possible()) {
-      auto child = handle;
-      parent_cancel_cb_ = std::unique_ptr<StopCb>(
-        new StopCb(parent_token_, [child]() { child.promise().stop_source.request_stop(); }));
+    Task & task;
+    std::shared_ptr<Waiting> waiting_;
+
+    bool await_ready() { return task.handle.done(); }
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
+    {
+      waiting_ = std::make_shared<Waiting>(h);
+      task.handle.promise().continuation = waiting_;
+      if (task.parent_token_.stop_possible()) {
+        auto child = task.handle;
+        task.parent_cancel_cb_ = std::unique_ptr<StopCb>(new StopCb(
+          task.parent_token_, [child]() { child.promise().stop_source.request_stop(); }));
+      }
+      if (task.started_) {
+        return std::noop_coroutine();
+      }
+      task.started_ = true;
+      return task.handle;
     }
-    if (started_) {
-      return std::noop_coroutine();
+    T await_resume()
+    {
+      task.parent_cancel_cb_.reset();
+      if (task.handle.promise().exception) {
+        std::rethrow_exception(task.handle.promise().exception);
+      }
+      return std::move(*task.handle.promise().value);
     }
-    started_ = true;
-    return handle;
-  }
-  T await_resume()
-  {
-    parent_cancel_cb_.reset();
-    if (handle.promise().exception) {
-      std::rethrow_exception(handle.promise().exception);
-    }
-    return std::move(*handle.promise().value);
-  }
+  };
+  Awaiter operator co_await() & { return Awaiter{*this, nullptr}; }
+  Awaiter operator co_await() && { return Awaiter{*this, nullptr}; }
 
   T & result()
   {
@@ -169,7 +180,7 @@ struct Task<void>
   struct promise_type
   {
     std::exception_ptr exception;
-    std::coroutine_handle<> continuation;
+    std::weak_ptr<Waiting> continuation;
     std::stop_source stop_source;
 
     Task get_return_object()
@@ -184,8 +195,8 @@ struct Task<void>
       bool await_ready() noexcept { return false; }
       std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept
       {
-        if (h.promise().continuation) {
-          return h.promise().continuation;
+        if (auto c = h.promise().continuation.lock()) {
+          return c->h;
         }
         return std::noop_coroutine();
       }
@@ -221,28 +232,38 @@ struct Task<void>
 
   void set_token(std::stop_token t) { parent_token_ = std::move(t); }
 
-  bool await_ready() { return handle.done(); }
-  std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
+  // See Task<T>::Awaiter.
+  struct Awaiter
   {
-    handle.promise().continuation = h;
-    if (parent_token_.stop_possible()) {
-      auto child = handle;
-      parent_cancel_cb_ = std::unique_ptr<StopCb>(
-        new StopCb(parent_token_, [child]() { child.promise().stop_source.request_stop(); }));
+    Task & task;
+    std::shared_ptr<Waiting> waiting_;
+
+    bool await_ready() { return task.handle.done(); }
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)
+    {
+      waiting_ = std::make_shared<Waiting>(h);
+      task.handle.promise().continuation = waiting_;
+      if (task.parent_token_.stop_possible()) {
+        auto child = task.handle;
+        task.parent_cancel_cb_ = std::unique_ptr<StopCb>(new StopCb(
+          task.parent_token_, [child]() { child.promise().stop_source.request_stop(); }));
+      }
+      if (task.started_) {
+        return std::noop_coroutine();
+      }
+      task.started_ = true;
+      return task.handle;
     }
-    if (started_) {
-      return std::noop_coroutine();
+    void await_resume()
+    {
+      task.parent_cancel_cb_.reset();
+      if (task.handle.promise().exception) {
+        std::rethrow_exception(task.handle.promise().exception);
+      }
     }
-    started_ = true;
-    return handle;
-  }
-  void await_resume()
-  {
-    parent_cancel_cb_.reset();
-    if (handle.promise().exception) {
-      std::rethrow_exception(handle.promise().exception);
-    }
-  }
+  };
+  Awaiter operator co_await() & { return Awaiter{*this, nullptr}; }
+  Awaiter operator co_await() && { return Awaiter{*this, nullptr}; }
 
   void cancel() { handle.promise().stop_source.request_stop(); }
 

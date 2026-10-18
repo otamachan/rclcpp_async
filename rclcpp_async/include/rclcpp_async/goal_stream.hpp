@@ -165,6 +165,7 @@ public:
   {
     GoalStream & stream;
     typename CancelResponse::SharedPtr response;
+    std::shared_ptr<Waiting> waiting_;
 
     bool await_ready() { return false; }
 
@@ -173,7 +174,7 @@ public:
     typename CancelResponse::SharedPtr await_resume() { return std::move(response); }
   };
 
-  CancelAwaiter cancel_goal() { return CancelAwaiter{*this, nullptr}; }
+  CancelAwaiter cancel_goal() { return CancelAwaiter{*this, nullptr, nullptr}; }
 
   void set_auto_cancel_on_stop(bool v) { auto_cancel_on_stop_ = v; }
 
