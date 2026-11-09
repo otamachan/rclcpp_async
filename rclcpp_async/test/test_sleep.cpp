@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <rclcpp/rclcpp.hpp>
+#include <rosgraph_msgs/msg/clock.hpp>
 
 #include "rclcpp_async/rclcpp_async.hpp"
 
@@ -214,4 +215,104 @@ TEST_F(SleepTest, CreateTaskKeepsTheLambdaAlive)
   }
   ASSERT_TRUE(task.handle.done());
   EXPECT_EQ(task.result(), 42);
+}
+
+class SimTimeSleepTest : public SleepTest
+{
+protected:
+  void SetUp() override
+  {
+    node_ = std::make_shared<rclcpp::Node>(
+      "test_sim_sleep_node",
+      rclcpp::NodeOptions{}.parameter_overrides({rclcpp::Parameter{"use_sim_time", true}}));
+    ctx_ = std::make_unique<CoContext>(*node_);
+    executor_.add_node(node_);
+    clock_pub_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", rclcpp::ClockQoS{});
+    publish_clock(1s);
+  }
+
+  void TearDown() override
+  {
+    clock_pub_.reset();
+    SleepTest::TearDown();
+  }
+
+  // Publish a simulated time and spin until the node clock has picked it up.
+  void publish_clock(std::chrono::nanoseconds sim_time)
+  {
+    rosgraph_msgs::msg::Clock msg;
+    msg.clock = rclcpp::Time{sim_time.count(), RCL_ROS_TIME};
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (node_->now() < rclcpp::Time{msg.clock, RCL_ROS_TIME} &&
+           std::chrono::steady_clock::now() < deadline) {
+      clock_pub_->publish(msg);
+      executor_.spin_some();
+      std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_GE(node_->now(), rclcpp::Time(msg.clock, RCL_ROS_TIME));
+  }
+
+  void spin_for(std::chrono::milliseconds duration)
+  {
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (std::chrono::steady_clock::now() < deadline) {
+      executor_.spin_some();
+      std::this_thread::sleep_for(1ms);
+    }
+  }
+
+  rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_pub_;
+};
+
+TEST_F(SimTimeSleepTest, SleepFollowsSimTime)
+{
+  bool completed = false;
+  auto coro = [&]() -> Task<void> {
+    co_await ctx_->sleep(1s);
+    completed = true;
+  };
+  auto task = ctx_->create_task(coro());
+
+  // Simulated time is frozen, so the sleep must not complete on wall time.
+  spin_for(300ms);
+  EXPECT_FALSE(completed);
+
+  publish_clock(2100ms);
+  spin_until_done(task);
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(SimTimeSleepTest, WallSleepIgnoresSimTime)
+{
+  bool completed = false;
+  auto coro = [&]() -> Task<void> {
+    co_await ctx_->wall_sleep(50ms);
+    completed = true;
+  };
+  auto task = ctx_->create_task(coro());
+
+  // Simulated time stays frozen; the wall sleep completes anyway.
+  spin_until_done(task);
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(SimTimeSleepTest, TimerStreamFollowsSimTime)
+{
+  int ticks = 0;
+  auto coro = [&]() -> Task<void> {
+    auto timer = ctx_->create_timer(1s);
+    co_await timer->next();
+    ticks++;
+  };
+  auto task = ctx_->create_task(coro());
+
+  spin_for(300ms);
+  EXPECT_EQ(ticks, 0);
+
+  publish_clock(2100ms);
+  spin_until_done(task);
+  ASSERT_TRUE(task.handle.done());
+  EXPECT_EQ(ticks, 1);
 }
