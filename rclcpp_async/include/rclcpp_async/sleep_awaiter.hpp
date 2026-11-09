@@ -40,6 +40,7 @@ struct SleepAwaiter
   std::shared_ptr<StopCb> cancel_cb_;
   bool cancelled = false;
   std::shared_ptr<Waiting> waiting_;
+  bool wall_clock = false;  // true: wall time; false: node clock (follows use_sim_time)
 
   void set_token(std::stop_token t) { token = std::move(t); }
 

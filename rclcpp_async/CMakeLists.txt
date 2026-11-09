@@ -59,6 +59,7 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_ros REQUIRED)
+  find_package(rosgraph_msgs REQUIRED)
   find_package(std_msgs REQUIRED)
   find_package(std_srvs REQUIRED)
   find_package(example_interfaces REQUIRED)
@@ -90,7 +91,7 @@ if(BUILD_TESTING)
 
   # Level 2: ROS2 integration tests (isolated domain ID for parallel safety)
   ament_add_ros_isolated_gtest(test_sleep test/test_sleep.cpp)
-  target_link_libraries(test_sleep ${PROJECT_NAME})
+  target_link_libraries(test_sleep ${PROJECT_NAME} ${rosgraph_msgs_TARGETS})
 
   ament_add_ros_isolated_gtest(test_callback_group test/test_callback_group.cpp)
   target_link_libraries(test_callback_group ${PROJECT_NAME} ${std_srvs_TARGETS})

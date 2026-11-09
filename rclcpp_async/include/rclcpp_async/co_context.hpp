@@ -202,9 +202,16 @@ public:
       *this, std::move(client), std::move(request), {}, {}, false, nullptr, nullptr};
   }
 
+  /// Sleep for `duration` measured on the node clock, so it follows simulated time when `use_sim_time` is set.
   SleepAwaiter sleep(std::chrono::nanoseconds duration)
   {
-    return SleepAwaiter{*this, duration, nullptr, {}, {}, false, nullptr};
+    return SleepAwaiter{*this, duration, nullptr, {}, {}, false, nullptr, false};
+  }
+
+  /// Sleep for `duration` of wall-clock time, regardless of `use_sim_time`.
+  SleepAwaiter wall_sleep(std::chrono::nanoseconds duration)
+  {
+    return SleepAwaiter{*this, duration, nullptr, {}, {}, false, nullptr, true};
   }
 
   template <typename ActionT>
@@ -270,13 +277,24 @@ public:
       name, std::move(handler), rclcpp::ServicesQoS(), callback_group_);
   }
 
+  /// Periodic timer on the node clock, so it follows simulated time when `use_sim_time` is set.
   std::shared_ptr<TimerStream> create_timer(std::chrono::nanoseconds period)
+  {
+    return create_timer_stream(period, false);
+  }
+
+  /// Periodic timer on the wall clock, regardless of `use_sim_time`.
+  std::shared_ptr<TimerStream> create_wall_timer(std::chrono::nanoseconds period)
+  {
+    return create_timer_stream(period, true);
+  }
+
+private:
+  std::shared_ptr<TimerStream> create_timer_stream(std::chrono::nanoseconds period, bool wall)
   {
     auto stream = std::make_shared<TimerStream>(*this);
     // As with subscribe(): dropping the stream stops and releases the timer.
-    stream->timer_ = node_.create_wall_timer(
-      period,
-      [weak = std::weak_ptr(stream), this]() {
+    auto callback = [weak = std::weak_ptr(stream), this]() {
         auto s = weak.lock();
         if (!s || s->closed_) {
           return;
@@ -284,17 +302,21 @@ public:
         if (!resume_now(*this, std::exchange(s->waiter_, {}))) {
           s->pending_++;
         }
-      },
-      callback_group_);
+      };
+    stream->timer_ =
+      wall ? rclcpp::TimerBase::SharedPtr{node_.create_wall_timer(period, callback, callback_group_)}
+           : rclcpp::TimerBase::SharedPtr{node_.create_timer(period, callback, callback_group_)};
     return stream;
   }
+
+public:
 
   template <typename Pred>
   Task<Result<void>> poll_until(
     Pred pred, std::chrono::nanoseconds interval, std::chrono::nanoseconds timeout)
   {
     if (pred()) co_return Result<void>::Ok();
-    auto timer = create_timer(interval);
+    auto timer = create_wall_timer(interval);
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
       co_await timer->next();
@@ -306,7 +328,7 @@ public:
   template <typename T>
   Task<Result<T>> wait_for(Task<T> task, std::chrono::nanoseconds timeout)
   {
-    auto timeout_task = [this, timeout]() -> Task<void> { co_await sleep(timeout); };
+    auto timeout_task = [this, timeout]() -> Task<void> { co_await wall_sleep(timeout); };
     auto result = co_await when_any(std::move(task), timeout_task());
     if (result.index() == 0) {
       if constexpr (std::is_void_v<T>) {
@@ -399,13 +421,15 @@ void SendRequestAwaiter<ServiceT>::await_suspend(std::coroutine_handle<> h)
 inline void SleepAwaiter::await_suspend(std::coroutine_handle<> h)
 {
   waiting_ = std::make_shared<Waiting>(h);
-  timer = ctx.node().create_wall_timer(
-    duration,
-    [this]() {
-      timer->cancel();
-      resume_now(ctx, waiting_);
-    },
-    ctx.callback_group());
+  auto on_timeout = [this]() {
+    timer->cancel();
+    resume_now(ctx, waiting_);
+  };
+  if (wall_clock) {
+    timer = ctx.node().create_wall_timer(duration, on_timeout, ctx.callback_group());
+  } else {
+    timer = ctx.node().create_timer(duration, on_timeout, ctx.callback_group());
+  }
 
   // Cancelled on the spot, so a tick after the stop request cannot win.
   cancel_cb_ = std::make_shared<StopCb>(token, [this]() {
