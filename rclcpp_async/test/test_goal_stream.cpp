@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <example_interfaces/action/fibonacci.hpp>
 #include <memory>
@@ -66,8 +67,9 @@ protected:
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
       },
       [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
-      [feedback_count, feedback_interval_ms](const std::shared_ptr<GoalHandle> goal_handle) {
-        std::thread([goal_handle, feedback_count, feedback_interval_ms]() {
+      [feedback_count, feedback_interval_ms,
+       succeeded = goals_succeeded_](const std::shared_ptr<GoalHandle> goal_handle) {
+        std::thread([goal_handle, feedback_count, feedback_interval_ms, succeeded]() {
           std::this_thread::sleep_for(500ms);
 
           auto feedback = std::make_shared<Fibonacci::Feedback>();
@@ -95,6 +97,7 @@ protected:
           auto result = std::make_shared<Fibonacci::Result>();
           result->sequence = feedback->sequence;
           goal_handle->succeed(result);
+          ++*succeeded;
         }).detach();
       });
   }
@@ -115,6 +118,8 @@ protected:
   rclcpp::executors::SingleThreadedExecutor executor_;
   rclcpp_action::Client<Fibonacci>::SharedPtr action_client_;
   rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
+  // Shared with the detached server threads, which can outlive the fixture.
+  std::shared_ptr<std::atomic<int>> goals_succeeded_ = std::make_shared<std::atomic<int>>(0);
 };
 
 TEST_F(GoalStreamTest, SendGoalAndReceiveResult)
@@ -374,4 +379,98 @@ TEST_F(GoalStreamTest, CancelDuringFeedback)
 
   ASSERT_TRUE(running.handle.done());
   EXPECT_TRUE(was_cancelled);
+}
+
+TEST_F(GoalStreamTest, DroppingTheStreamAfterCompletionReleasesIt)
+{
+  create_accepting_server();
+
+  for (int i = 0; i < 50; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(10ms);
+    if (action_client_->action_server_is_ready()) {
+      break;
+    }
+  }
+  ASSERT_TRUE(action_client_->action_server_is_ready());
+
+  std::weak_ptr<GoalStream<Fibonacci>> weak;
+  bool completed = false;
+
+  auto coro = [&]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 5;
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    if (!goal_result.ok()) {
+      co_return;
+    }
+
+    auto stream = *goal_result.value;
+    weak = stream;
+    while (true) {
+      auto feedback = co_await stream->next();
+      if (!feedback.has_value()) {
+        break;
+      }
+    }
+    completed = true;
+  };
+
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task, 10s);
+
+  ASSERT_TRUE(task.handle.done());
+  ASSERT_TRUE(completed);
+  EXPECT_TRUE(weak.expired());
+}
+
+TEST_F(GoalStreamTest, DroppingTheStreamMidGoalReleasesIt)
+{
+  create_accepting_server(5, 100);
+
+  for (int i = 0; i < 50; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(10ms);
+    if (action_client_->action_server_is_ready()) {
+      break;
+    }
+  }
+  ASSERT_TRUE(action_client_->action_server_is_ready());
+
+  std::weak_ptr<GoalStream<Fibonacci>> weak;
+  bool got_feedback = false;
+
+  auto coro = [&]() -> Task<void> {
+    Fibonacci::Goal goal;
+    goal.order = 5;
+    auto goal_result = co_await ctx_->send_goal<Fibonacci>(action_client_, goal);
+    if (!goal_result.ok()) {
+      co_return;
+    }
+
+    auto stream = *goal_result.value;
+    weak = stream;
+    auto feedback = co_await stream->next();
+    got_feedback = feedback.has_value();
+  };
+
+  auto task = ctx_->create_task(coro());
+  spin_until_done(task, 10s);
+
+  ASSERT_TRUE(task.handle.done());
+  ASSERT_TRUE(got_feedback);
+  EXPECT_TRUE(weak.expired());
+
+  // The goal keeps running: let its remaining feedback and its result reach the
+  // callbacks of the dropped stream.
+  auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (*goals_succeeded_ == 0 && std::chrono::steady_clock::now() < deadline) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
+  ASSERT_EQ(*goals_succeeded_, 1);
+  for (int i = 0; i < 100; i++) {
+    executor_.spin_some();
+    std::this_thread::sleep_for(1ms);
+  }
 }

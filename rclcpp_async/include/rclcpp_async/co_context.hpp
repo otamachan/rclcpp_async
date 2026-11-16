@@ -474,14 +474,24 @@ void SendGoalAwaiter<ActionT>::await_suspend(std::coroutine_handle<> h)
 
   typename rclcpp_action::Client<ActionT>::SendGoalOptions options;
 
-  options.feedback_callback = [s = stream](auto, const auto & feedback) {
+  // The goal handle is owned by the stream and stores these callbacks, so they
+  // hold the stream weakly: otherwise the two keep each other alive.
+  options.feedback_callback = [weak = std::weak_ptr(stream)](auto, const auto & feedback) {
+    auto s = weak.lock();
+    if (!s) {
+      return;
+    }
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kFeedback;
     event.feedback = feedback;
     s->push(std::move(event));
   };
 
-  options.result_callback = [s = stream](const auto & wrapped_result) {
+  options.result_callback = [weak = std::weak_ptr(stream)](const auto & wrapped_result) {
+    auto s = weak.lock();
+    if (!s) {
+      return;
+    }
     GoalEvent<ActionT> event;
     event.type = GoalEvent<ActionT>::Type::kComplete;
     event.result = wrapped_result;
